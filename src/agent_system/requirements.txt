@@ -1,0 +1,23 @@
+# src/agent_system 的額外相依（雲端對話 pipeline 用）。
+#
+# SDK 本體不在這裡：reachy-mini 跟著 repo 的 pyproject.toml 走。
+#
+# 安裝（一定要在 virtualenv 裡，不要裝到全域 Python）：
+#     reachy_mini_env\Scripts\activate
+#     uv pip install -r src/agent_system/requirements.txt
+#
+# 從零開始的話先補上 SDK 本身：
+#     uv sync --all-extras --group dev
+
+# 雲端 LLM、Whisper STT、Open-Meteo 天氣 API 全部走 httpx。
+# 目前它是 huggingface-hub 的傳遞相依，所以「剛好裝得到」——但別靠別人的
+# 相依樹過日子，upstream 換掉 HTTP client 這條 pipeline 就整個掛掉。
+httpx>=0.28.1
+
+# TTS。微軟 Edge 的線上語音，免金鑰、免註冊。
+edge-tts>=7.2.8
+
+# 讀 repo 根目錄的 .env 拿 API 金鑰。沒裝也能跑，只是退回只吃系統環境變數。
+python-dotenv>=1.2.3
+
+# numpy（--input mic 錄音時用）已經是 reachy-mini 的相依，不重複列。

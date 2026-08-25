@@ -1,5 +1,19 @@
 # Reachy Mini 🤖
 
+> **關於這個 fork**
+>
+> 本專案衍生自 [pollen-robotics/reachy_mini](https://github.com/pollen-robotics/reachy_mini)，
+> 原始著作權 © 2025 Pollen Robotics，以 Apache-2.0 授權釋出（見 [LICENSE](LICENSE)）。
+>
+> 相對於上游的修改：
+>
+> - 新增 `src/agent_system/` —— 雲端三段式對話 pipeline（STT → LLM → 工具 → TTS → 動作）
+> - 新增 `tests/my_tests/` 與 `diagnose_motors.py` —— 針對實機的硬體診斷腳本
+> - 新增 `CONTROL_CHAIN.md`、`EMOTIONS.md`、`MOTOR_REFERENCE.md` —— 控制鏈與硬體參考筆記
+> - 將 `README.md`、`RELEASE.md`、`docs/notebooks/` 翻譯為繁體中文
+>
+> 逐檔的修改紀錄見 commit history。
+
 [![Ask on HuggingChat](https://img.shields.io/badge/Read_the-Documentation-yellow?logo=huggingface&logoColor=yellow)](https://huggingface.co/docs/reachy_mini/)
 [![Discord](https://img.shields.io/badge/Discord-Join_the_Community-7289DA?logo=discord&logoColor=white)](https://discord.gg/Y7FgMqHsub)
 

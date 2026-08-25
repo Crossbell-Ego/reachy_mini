@@ -1,113 +1,77 @@
-# Releasing `reachy_mini`
+# 發布 `reachy_mini`
 
-Releases are driven by the **Release** workflow (`.github/workflows/wheels.yml`),
-a single `workflow_dispatch` with a `release_type` dropdown. The version lives
-statically in `pyproject.toml` (single source of truth): `main` carries
-`X.Y.Z.dev0`; each `vX.Y-release` branch carries its released `X.Y.Z`.
+版本發布是由 **Release** 工作流程（`.github/workflows/wheels.yml`）驅動，
+這是一個帶有 `release_type` 下拉選單的單一 `workflow_dispatch`。版本號靜態存在於 `pyproject.toml`（唯一的真實來源）：`main` 分支帶有 `X.Y.Z.dev0`；每個 `vX.Y-release` 分支則帶有已發布的 `X.Y.Z`。
 
-> **Note:** `main` intentionally carries a [PEP 440](https://peps.python.org/pep-0440/)
-> `.dev0` version (e.g. `1.10.0.dev0`), which is **not** valid semver. Any tooling that
-> reads the version out of `pyproject.toml` must handle non-semver PEP 440 forms
-> (`.devN`, `rcN`, etc.) — e.g. the npm-publish CI normalizes the version to semver
-> before calling `npm version`.
+> **注意：** `main` 分支刻意採用 [PEP 440](https://peps.python.org/pep-0440/) 的 `.dev0` 版本格式（例如 `1.10.0.dev0`），這**不是**標準的語意化版本 (semver)。任何從 `pyproject.toml` 讀取版本的工具都必須能處理非 semver 的 PEP 440 格式（`.devN`、`rcN` 等）— 例如 npm-publish CI 在呼叫 `npm version` 前會先將版本正規化為 semver。
 
-## The three modes
+## 三種發布模式
 
-| Mode | Trigger from | What it does |
+| 模式 | 觸發來源 | 功能說明 |
 |------|--------------|--------------|
-| `dry-run` | anywhere | Read-only preflight: checks every secret/var is set, that `RELEASE_PAT` can push both repos, that the `pypi` environment exists, that OpenCode + the model + the HF token work (tiny live call), and previews the versions each mode would produce. Tags nothing, publishes nothing, opens no PR. Run this first. |
-| `minor-prerelease` | `main` | Reads `X.Y.Z.dev0` → cuts `X.Y.Zrc<N>` (RC starts at 1), **resets `vX.Y-release` to `main`** so every RC is a fresh snapshot, tags, publishes to PyPI, regenerates the AI release notes, and publishes/refreshes **this minor's GitHub prerelease** (one release per minor: each RC retags it and refreshes its notes, so the releases page always shows the newest RC as a published prerelease). Also opens an RC-test PR in `reachy_mini_conversation_app`. |
-| `minor-release` | `main` | Promotes the latest RC → `X.Y.Z`, publishes to PyPI, promotes that prerelease to the final tag (marked *latest*, prerelease flag cleared), triggers the docs build, and opens a PR bumping `main` to `X.(Y+1).0.dev0`. |
-| `patch-release` | `vX.Y-release` | Bumps the patch (`X.Y.Z+1`), tags, publishes. Not marked *latest*. |
+| `dry-run` | 任何分支 | 唯讀行前檢查：檢查每個 secret/var 是否已設置、`RELEASE_PAT` 是否能推送至兩個儲存庫、`pypi` 環境是否存在、OpenCode + 模型 + HF token 是否可正常運作（微型即時呼叫測試），並預覽每個模式會產生的版本號。不打 tag、不發布、不開 PR。請務必先執行此模式。 |
+| `minor-prerelease` | `main` | 讀取 `X.Y.Z.dev0` → 切出 `X.Y.Zrc<N>`（RC 從 1 開始），**將 `vX.Y-release` 重設為 `main`**（使每個 RC 都是全新快照）、打 tag、發布至 PyPI、重新生成 AI 發布說明，並發布/重新整理**此次要版本的 GitHub 預發布 (prerelease)**（每個次要版本維護一個 release：每個 RC 都會重新標記並更新其說明，因此 releases 頁面始終顯示最新的 RC 作為已發布的預發布版）。同時在 `reachy_mini_conversation_app` 開啟 RC 測試 PR。 |
+| `minor-release` | `main` | 將最新 RC 晉升為正式版 `X.Y.Z`、發布至 PyPI、將該預發布版轉為正式 tag（標記為 *latest*，清除 prerelease 標記）、觸發文件建置，並開啟 PR 將 `main` 的版本遞增為 `X.(Y+1).0.dev0`。 |
+| `patch-release` | `vX.Y-release` | 遞增修補版本號 (`X.Y.Z+1`)、打 tag、發布。不會標記為 *latest*。 |
 
-Typical flow: `minor-prerelease` → validate the RC (its PR CI in the conversation app,
-plus manual testing) → re-run `minor-prerelease` for more RCs if needed → `minor-release`.
-Bugfix on a shipped minor: cherry-pick onto `vX.Y-release`, then `patch-release` from it.
+典型流程：`minor-prerelease` → 驗證 RC（透過對話 App 中的 PR CI 以及手動測試）→ 若需要更多 RC 則再次執行 `minor-prerelease` → `minor-release`。
+已發布次要版本的錯誤修復：cherry-pick 至 `vX.Y-release`，然後從該分支執行 `patch-release`。
 
-Always run `dry-run` first to confirm secrets/vars/access are set.
+請務必先執行 `dry-run` 以確認 secrets/vars/權限皆已設置妥當。
 
-## Job graph & recovery
+## 工作流程圖與失敗復原
 
 ```
-prepare ──▶ publish-pypi ──┬──▶ publish-npm      (dispatches the npm workflow at the tag)
+prepare ──▶ publish-pypi ──┬──▶ publish-npm      (在該 tag 觸發 npm 工作流程)
                            ├──▶ release-notes
-                           ├──▶ test-downstream   (prerelease only)
-                           └──▶ post-release       (minor-release only)
+                           ├──▶ test-downstream   (僅 prerelease)
+                           └──▶ post-release       (僅 minor-release)
 ```
 
-`prepare` pushes the version-bump commit **and the tag before** publishing, so the tag
-already exists once publishing starts. Everything after `prepare` is gated on a
-successful `publish-pypi`: if the publish fails, no GitHub release is published/promoted,
-no RC-test PR and no bump PR are opened — the pipeline stops.
+`prepare` 會在發布**之前**先推送版本遞增的 commit **與 tag**，因此當發布開始時 tag 已經存在。`prepare` 之後的所有步驟都依賴於成功的 `publish-pypi`：如果發布失敗，就不會發布/晉升 GitHub release，也不會開啟 RC 測試 PR 與版本遞增 PR — 整個流水線將會停止。
 
-**If `publish-pypi` fails:** do **not** re-trigger the whole workflow (`prepare` would
-error on the now-existing tag). Instead **re-run the `publish-pypi` job from the Actions
-UI** ("Re-run failed jobs"); once it succeeds, `release-notes` and the rest run off it.
-No re-tagging needed. If the tag/branch are wrong and you must start over, delete the tag
-(and the `vX.Y-release` branch if it was just created) before re-triggering.
+**如果 `publish-pypi` 失敗：** 請**不要**重新觸發整個工作流程（`prepare` 會因為 tag 已存在而報錯）。請改為**從 Actions UI 重新執行 `publish-pypi` 任務**（點擊「Re-run failed jobs」）；一旦成功，`release-notes` 與後續任務會接著繼續執行，不需要重新打 tag。如果 tag 或分支有誤且必須從頭開始，請在重新觸發前先刪除該 tag（以及剛建立的 `vX.Y-release` 分支）。
 
-## The release branch
+## 發布分支 (Release branch)
 
-`vX.Y-release` is **reset to `main` on every `minor-prerelease`** (force-pushed), so each
-RC ships exactly what is on `main` at that moment. Anything committed straight onto the
-release branch is discarded — land the fix on `main` and cut another RC.
+`vX.Y-release` 分支在**每次執行 `minor-prerelease` 時都會重設為 `main`**（強制推送），因此每個 RC 發布的內容完全等同於該時間點的 `main`。直接提交到發布分支上的任何修改都會被丟棄 — 請將修復合併到 `main` 後再切出新的 RC。
 
-`minor-release` and `patch-release` do *not* reset: they build on the branch as the last
-RC left it, so the final release is the code you actually tested.
+`minor-release` 和 `patch-release` **不會**重設：它們會以最後一個 RC 留下來的狀態建置，因此最終發布的內容就是你實際測試過的程式碼。
 
-## One-time setup
+## 一次性設定 (One-time setup)
 
-- **PyPI Trusted Publisher** for project `reachy-mini`: repo `pollen-robotics/reachy_mini`,
-  workflow `wheels.yml`. (OIDC — no token stored.) The workflow is intentionally named
-  `wheels.yml` to reuse the pre-existing Trusted Publisher (which has no environment
-  restriction), so no PyPI change is needed. If you later rename it to `release.yml`, add a
-  matching Trusted Publisher entry on PyPI first.
-- **`pypi` GitHub Environment** in repo settings; add required reviewers to gate publishing.
-- **Secret `RELEASE_PAT`** — PAT or GitHub App token with `contents:write` +
-  `pull_requests:write` on **both** `reachy_mini` and `reachy_mini_conversation_app`
-  (used to open the RC-test PR and the post-release bump PR so their CI runs).
-- **Secret `RELEASE_NOTES_HF_TOKEN`** — HF token scoped to Inference Providers.
-- **Var `RELEASE_NOTES_MODEL`** — e.g. `huggingface/zai-org/GLM-5.2`.
-- **Var `OPENCODE_VERSION`** — pinned OpenCode version installed in CI.
-- Add a `rc-testing` label in `reachy_mini_conversation_app` (optional; the PR still
-  opens without it).
+- **PyPI Trusted Publisher**（針對專案 `reachy-mini`）：儲存庫 `pollen-robotics/reachy_mini`，工作流程 `wheels.yml`。（OIDC — 不儲存 token。）工作流程特意命名為 `wheels.yml` 是為了重用現有的 Trusted Publisher（無環境限制），因此不需要修改 PyPI 設定。若日後重新命名為 `release.yml`，請先在 PyPI 上新增對應的 Trusted Publisher 項目。
+- Repo 設定中的 **`pypi` GitHub Environment**；新增必要的審查者 (reviewers) 來管制發布。
+- **Secret `RELEASE_PAT`** — 具有 `reachy_mini` 和 `reachy_mini_conversation_app` **兩者**的 `contents:write` + `pull_requests:write` 權限的 PAT 或 GitHub App token（用於開啟 RC 測試 PR 與發布後的版本遞增 PR，以便觸發其 CI）。
+- **Secret `RELEASE_NOTES_HF_TOKEN`** — 具有 Inference Providers 權限範圍的 HF token。
+- **Var `RELEASE_NOTES_MODEL`** — 例如 `huggingface/zai-org/GLM-5.2`。
+- **Var `OPENCODE_VERSION`** — CI 中安裝的 OpenCode 固定版本。
+- 在 `reachy_mini_conversation_app` 中新增 `rc-testing` 標籤（可選；即使沒有也能正常開啟 PR）。
 
-## Release notes (AI-drafted)
+## 發布說明 (AI 自動起草)
 
-`utils/release_notes/` ports huggingface_hub's "trust-but-verify" generator:
+`utils/release_notes/` 移植了 huggingface_hub 的「信任但驗證 (trust-but-verify)」生成器：
 
-1. `fetch_prs.py` — lists PRs merged since the previous tag (ground-truth manifest).
-2. OpenCode drafts notes via the `.opencode/skills/reachy-mini-release-notes` skill.
-3. `validate_notes.py` — checks every manifest PR appears and no extras leaked; the
-   orchestrator loops to fix discrepancies (up to 3 iterations).
+1. `fetch_prs.py` — 列出前一個 tag 之後合併的所有 PR（基準清單）。
+2. OpenCode 透過 `.opencode/skills/reachy-mini-release-notes` skill 起草說明。
+3. `validate_notes.py` — 檢查清單中的每個 PR 是否都有列出且沒有多餘的 PR；協調器會循環修正差異（最多 3 次迭代）。
 
-Run locally to preview:
+在本地執行以進行預覽：
 
 ```bash
-export GITHUB_TOKEN=...            # repo read
+export GITHUB_TOKEN=...            # repo 讀取權限
 export HF_TOKEN=...                # Inference Providers
 export RELEASE_NOTES_MODEL=huggingface/zai-org/GLM-5.2
 python -m utils.release_notes.generate_release_notes --since v1.9.0 --minor
 # → .release-notes/RELEASE_NOTES_v1.10.0.md
 ```
 
-The GitHub prerelease is editable before you run `minor-release` — polish tone there.
+在執行 `minor-release` 之前，GitHub 預發布版是可以編輯的 — 可以在那裡微調文字語氣。
 
-**Your edits survive later RCs.** The first RC of a minor generates the notes from
-scratch. Every later RC *seeds* from the release's current body (`--seed`) and runs only
-the validation loop, which appends the PRs merged since and drops stale ones — the
-surrounding prose, including anything you rewrote by hand, is left alone. If no new PRs
-landed since the last RC, validation passes immediately and the model is never called.
+**你的手動編輯在後續的 RC 中會被保留。** 某個次要版本的第一個 RC 會從頭生成說明。之後的每個 RC 會以目前 release 的內容為基準（`--seed`），只執行驗證迴圈：追加新合併的 PR 並移除失效的 PR — 周圍的文案（包括任何你手動修改的內容）都不會被更動。如果在上一個 RC 之後沒有新的 PR 合併，驗證會立即通過且完全不會呼叫模型。
 
-`minor-release` never regenerates at all: it publishes the body as-is, so the last thing
-you edited is exactly what ships.
+`minor-release` 永遠不會重新生成：它會原封不動地直接發布內容，因此你最後編輯的內容就是最終發布的版本。
 
-**One caveat when editing.** Validation scrapes the notes for `#<number>` and treats every
-match as a PR that must be in this release. So a reference that is *not* part of the
-release — an issue number, a PR from another repo, a "thanks, see #999" — is classified as
-an extra, and the fix-up step removes **the whole line containing it** on the next RC.
+**編輯時的一點注意事項：** 驗證機制會在說明中搜尋 `#<數字>`，並將每個符合項視為必須存在於本次發布中的 PR。因此，如果引用的內容*不屬於*本次發布（例如 issue 編號、其他 repo 的 PR，或「感謝，請見 #999」），就會被歸類為多餘項目，且在下一個 RC 的修復步驟中**包含該字樣的整行都會被刪除**。
 
-Plain prose is safe, as are the generated `by @author in #1234` lines. To link an issue,
-use the full URL (`https://github.com/pollen-robotics/reachy_mini/issues/1338`): it renders
-the same and the regex only matches a bare `#` followed by digits. Edits made after the
-last RC are safe regardless, since `minor-release` never regenerates.
+一般的純文字敘述是安全的，自動生成的 `by @author in #1234` 也是安全的。若要引用 issue，請使用完整網址（`https://github.com/pollen-robotics/reachy_mini/issues/1338`）：顯示效果相同，但正則表達式只會匹配獨立的 `#` 加上數字。在最後一個 RC 之後進行的編輯則沒有此限制，因為 `minor-release` 絕不會重新生成。

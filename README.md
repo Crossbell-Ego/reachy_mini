@@ -3,71 +3,89 @@
 [![Ask on HuggingChat](https://img.shields.io/badge/Read_the-Documentation-yellow?logo=huggingface&logoColor=yellow)](https://huggingface.co/docs/reachy_mini/)
 [![Discord](https://img.shields.io/badge/Discord-Join_the_Community-7289DA?logo=discord&logoColor=white)](https://discord.gg/Y7FgMqHsub)
 
-**Reachy Mini is an open-source, expressive robot made for hackers and AI builders.**
+**Reachy Mini 是一款專為駭客與 AI 開發者打造的開源、富含表情的機器人。**
 
-🛒 [**Buy Reachy Mini**](https://www.hf.co/reachy-mini/)
+🛒 [**購買 Reachy Mini**](https://www.hf.co/reachy-mini/)
 
 [![Reachy Mini Hello](/docs/assets/reachy_mini_hello.gif)](https://www.pollen-robotics.com/reachy-mini/)
 
-## ⚡️ Build and start your own robot
+## ⚡️ 組裝並啟動你自己的機器人
 
-**Choose your platform to access the specific guide:**
+**選擇你的平台以閱讀專屬指南：**
 
-| **🤖 Reachy Mini (Wireless)** | **🔌 Reachy Mini Lite** | **💻 Simulation** |
+| **🤖 Reachy Mini (無線版 Wireless)** | **🔌 Reachy Mini Lite** | **💻 模擬器 (Simulation)** |
 | :---: | :---: | :---: |
-| The full autonomous experience.<br>Raspberry Pi CM4 + Battery + WiFi. | The developer version.<br>USB connection to your computer. | No hardware required.<br>Prototype in MuJoCo. |
-| 👉 [**Go to Wireless Guide**](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini/get_started) | 👉 [**Go to Lite Guide**](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini_lite/get_started) | 👉 [**Go to Simulation**](https://huggingface.co/docs/reachy_mini/platforms/simulation/get_started) |
+| 完整的獨立自主體驗。<br>Raspberry Pi CM4 + 電池 + WiFi。 | 開發者版本。<br>透過 USB 連線到你的電腦。 | 無需硬體。<br>在 MuJoCo 中快速建立原型。 |
+| 👉 [**前往無線版指南**](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini/get_started) | 👉 [**前往 Lite 指南**](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini_lite/get_started) | 👉 [**前往模擬器指南**](https://huggingface.co/docs/reachy_mini/platforms/simulation/get_started) |
 
 
 
-> ⚡ **Pro tip:** Install [uv](https://docs.astral.sh/uv/getting-started/installation/) for 10-100x faster app installations (auto-detected, falls back to `pip`).
-
-<br>
-
-## 📱 Apps & Ecosystem
-
-Reachy Mini comes with an app store powered by Hugging Face Spaces. You can install these apps directly from your robot's dashboard with one click!
-
-* **🗣️ [Conversation App](https://huggingface.co/spaces/pollen-robotics/reachy_mini_conversation_app):** Talk naturally with Reachy Mini (powered by LLMs).
-* **📻 [Radio](https://huggingface.co/spaces/pollen-robotics/reachy_mini_radio):** Listen to the radio with Reachy Mini!
-* **👋 [Hand Tracker](https://huggingface.co/spaces/pollen-robotics/hand_tracker_v2):** The robot follows your hand movements in real-time.
-
-👉 [**Browse all apps on Hugging Face**](https://hf.co/reachy-mini/#/apps)
+> ⚡ **實用技巧：** 安裝 [uv](https://docs.astral.sh/uv/getting-started/installation/) 可享有 10-100 倍更快的 App 安裝速度（系統會自動偵測，若無則回退至 `pip`）。
 
 <br>
 
-## 🚀 Getting Started with Reachy Mini SDK
+## 📱 應用程式與生態系統 (Apps & Ecosystem)
 
-### User guides
-* **[Installation](https://huggingface.co/docs/reachy_mini/SDK/installation)**: 5 minutes to set up your computer
-* **[Quickstart Guide](https://huggingface.co/docs/reachy_mini/SDK/quickstart)**: Run your first behavior on Reachy Mini
-* **[JavaScript SDK & Web Apps](https://huggingface.co/docs/reachy_mini/SDK/javascript-sdk)**: Build browser apps that drive the robot over WebRTC — **the easiest way to share your apps**.
-* **[AI Integrations](https://huggingface.co/docs/reachy_mini/SDK/integration)**: Connect LLMs, build Apps, and publish to Hugging Face.
-* **[Core Concepts](https://huggingface.co/docs/reachy_mini/SDK/core-concept)**: Architecture, coordinate systems, and safety limits.
-* **[Python SDK](https://huggingface.co/docs/reachy_mini/SDK/python-sdk)**: Full robot control from Python — scripts, control loops, and on-robot code.
-* 🤗[**Share your app with the community**](https://huggingface.co/blog/pollen-robotics/make-and-publish-your-reachy-mini-apps)
-* 📂 [**Browse the Examples Folder**](examples)
-* 📓 [**Tutorial Notebooks**](docs/notebooks): Step-by-step Jupyter notebooks covering connection, movement, camera, and audio
+Reachy Mini 內建由 Hugging Face Spaces 支援的應用程式商店。你可以直接在機器人的儀表板上一鍵安裝這些 App！
 
-### 🤖 AI-Assisted Development
+* **🗣️ [對話 App (Conversation App)](https://huggingface.co/spaces/pollen-robotics/reachy_mini_conversation_app)：** 與 Reachy Mini 自然對話（由大型語言模型 LLM 驅動）。
+* **📻 [廣播電台 (Radio)](https://huggingface.co/spaces/pollen-robotics/reachy_mini_radio)：** 和 Reachy Mini 一起收聽廣播！
+* **👋 [手部追蹤 (Hand Tracker)](https://huggingface.co/spaces/pollen-robotics/hand_tracker_v2)：** 機器人即時跟隨你的手部動作。
 
-Using an AI coding agent (Claude Code, Codex, Copilot, etc.)? You can start building apps right away. Paste this prompt to your agent:
+👉 [**在 Hugging Face 上瀏覽所有應用程式**](https://hf.co/reachy-mini/#/apps)
+
+<br>
+
+## 🚀 開始使用 Reachy Mini SDK
+
+### 使用者指南
+* **[安裝指南 (Installation)](https://huggingface.co/docs/reachy_mini/SDK/installation)**：5 分鐘完成電腦開發環境設定
+* **[快速上手指南 (Quickstart Guide)](https://huggingface.co/docs/reachy_mini/SDK/quickstart)**：在 Reachy Mini 上執行你的第一個行為
+* **[JavaScript SDK 與網頁應用 (Web Apps)](https://huggingface.co/docs/reachy_mini/SDK/javascript-sdk)**：建立透過 WebRTC 控制機器人的瀏覽器應用 — **分享應用程式最簡單的方式**。
+* **[AI 整合 (AI Integrations)](https://huggingface.co/docs/reachy_mini/SDK/integration)**：串接 LLM、開發 App 並發布至 Hugging Face。
+* **[核心概念 (Core Concepts)](https://huggingface.co/docs/reachy_mini/SDK/core-concept)**：系統架構、座標系統與安全限制。
+* **[Python SDK](https://huggingface.co/docs/reachy_mini/SDK/python-sdk)**：從 Python 完整控制機器人 — 支援腳本、控制迴圈與機載程式。
+* 🤗[**與社群分享你的 App**](https://huggingface.co/blog/pollen-robotics/make-and-publish-your-reachy-mini-apps)
+* 📂 [**瀏覽範例資料夾 (Examples)**](examples)
+* 📓 [**教學筆記本 (Tutorial Notebooks)**](docs/notebooks)：循序漸進的 Jupyter 筆記本，涵蓋連線、動作、相機與音訊
+
+### 🤖 AI 輔助開發
+
+正在使用 AI 輔助編程工具（Claude Code、Codex、Copilot 等）嗎？你可以立即開始建立應用程式。將以下 Prompt 貼給你的 AI 代理：
 
 > *I'd like to create a Reachy Mini app. Start by reading https://github.com/pollen-robotics/reachy_mini/blob/main/AGENTS.md*
 
-This [**AGENTS.md**](AGENTS.md) guide gives AI agents everything they need: SDK patterns, best practices, example apps, and step-by-step skills.
+這份 [**AGENTS.md**](AGENTS.md) 指南為 AI 代理提供了所需的一切資訊：SDK 使用模式、最佳實踐、範例應用與逐步技能指南。
 
-### Quick Look
-Most Reachy Mini apps are **web / JS apps**: a static page that drives the robot over WebRTC from any browser, with zero install for whoever uses it — this is the recommended path for new apps (see the [JavaScript SDK & Web Apps](https://huggingface.co/docs/reachy_mini/SDK/javascript-sdk) guide).
+### 啟動 Daemon 背景服務 (每次執行前必做)
 
-Prefer to stay in Python for on-robot control loops? After [installing the SDK](https://huggingface.co/docs/reachy_mini/SDK/installation), once your robot is awake, you can control it in just **a few lines of code**:
+在執行任何控制程式或 Jupyter Notebook 前，請先開啟獨立終端機啟動 Daemon：
+
+1. **啟用虛擬環境**：
+   ```powershell
+   reachy_mini_env\Scripts\activate
+   ```
+2. **啟動 Daemon**：
+   - **實體機器人**：
+     ```powershell
+     reachy-mini-daemon
+     ```
+   - **模擬器 (MuJoCo)**：
+     ```powershell
+     reachy-mini-daemon --sim
+     ```
+
+### 快速預覽
+大多數 Reachy Mini 應用都是 **網頁 / JS App**：一個透過 WebRTC 從任何瀏覽器控制機器人的靜態網頁，使用者端完全零安裝 — 這是開發新應用的推薦途徑（請參閱 [JavaScript SDK 與網頁應用](https://huggingface.co/docs/reachy_mini/SDK/javascript-sdk) 指南）。
+
+更傾向於使用 Python 開發機載即時控制迴圈？[安裝 SDK](https://huggingface.co/docs/reachy_mini/SDK/installation) 且喚醒機器人後，只需要**幾行程式碼**就能控制它：
 
 ```python
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 
 with ReachyMini() as mini:
-    # Look up and tilt head
+    # 抬頭並傾斜
     mini.goto_target(
         head=create_head_pose(z=10, roll=15, degrees=True, mm=True),
         duration=1.0
@@ -76,29 +94,29 @@ with ReachyMini() as mini:
 
 <br>
 
-## 🛠 Hardware Overview
+## 🛠 硬體總覽
 
-Reachy Mini robots are sold as kits and generally take **2 to 3 hours** to assemble. Detailed step-by-step guides are available in the platform-specific folders linked above.
+Reachy Mini 機器人以套件形式販售，通常需要 **2 到 3 小時** 組裝。上方連結的各平台專屬資料夾中提供了詳細的逐步組裝指南。
 
-* **Reachy Mini (Wireless):** Runs onboard (RPi CM4), autonomous, includes IMU. [See specs](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini/hardware).
-* **Reachy Mini Lite:** Runs on your PC, powered via wall outlet. [See specs](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini_lite/hardware).
-
-<br>
-
-## ❓ Troubleshooting
-
-Encountering an issue? 👉 **[Check the Troubleshooting & FAQ Guide](https://huggingface.co/docs/reachy_mini/troubleshooting)**
+* **Reachy Mini (無線版 Wireless)：** 運行於機載電腦 (RPi CM4)，自主運作，內建 IMU。[查看規格](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini/hardware)。
+* **Reachy Mini Lite：** 運行於你的個人電腦，透過插座供電。[查看規格](https://huggingface.co/docs/reachy_mini/platforms/reachy_mini_lite/hardware)。
 
 <br>
 
-## 🤝 Community & Contributing
+## ❓ 疑難排解
 
-* **Join the Community:** Join [Discord](https://discord.gg/2bAhWfXme9) to share your moments with Reachy, build apps together, and get help.
-* **Found a bug?** Open an issue on this repository.
-* **Guidelines:** Review our [contributing guidelines](docs/contributing.md) to learn how to contribute code, report issues, or suggest features.
+遇到問題了嗎？👉 **[查閱疑難排解與常見問題指南](https://huggingface.co/docs/reachy_mini/troubleshooting)**
+
+<br>
+
+## 🤝 社群與貢獻
+
+* **加入社群：** 加入 [Discord](https://discord.gg/2bAhWfXme9) 分享你與 Reachy 的精彩瞬間、一起開發應用並獲得支援。
+* **發現錯誤？** 歡迎在此儲存庫提交 Issue。
+* **貢獻指南：** 請閱讀我們的 [貢獻指南 (contributing guidelines)](docs/contributing.md)，了解如何貢獻程式碼、回報問題或提出新功能建議。
 
 
-## License
+## 授權條款 (License)
 
-This project is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE) file for details.
-Hardware design files are licensed under Creative Commons BY-SA-NC.
+本專案採用 Apache 2.0 授權條款。詳情請參閱 [LICENSE](LICENSE) 檔案。
+硬體設計檔案採用創用 CC 姓名標示-相同方式分享-非商業性 (Creative Commons BY-SA-NC) 授權條款。

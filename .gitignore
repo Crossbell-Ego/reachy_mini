@@ -326,3 +326,6 @@ src/agent_system/profiles/
 # agent 教學示範用的本機行事曆：私人行程，不進版控。
 src/agent_system/calendar.json
 
+# 本機虛擬環境。uv 建的 venv 內部自帶 .gitignore（內容是 *），
+# 但複製專案時那層可能掉，這裡明寫一次比較保險。
+/reachy_mini_env/

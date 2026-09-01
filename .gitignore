@@ -319,3 +319,10 @@ reply_*.mp3
 # 這個 fork 是公開的，沒必要把工作站的目錄結構攤出去。
 /.agents/
 /docs/my_notes/
+
+# agent 控制台的個人設定（角色、長期記憶）：私人內容，不進版控。
+src/agent_system/profiles/
+
+# agent 教學示範用的本機行事曆：私人行程，不進版控。
+src/agent_system/calendar.json
+

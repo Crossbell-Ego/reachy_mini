@@ -3,7 +3,8 @@ r"""Reachy Mini 雲端三段式對話 Pipeline：STT → LLM → 工具 → TTS 
 設計目標
 --------
 完全不吃本地顯卡：辨識與生成都丟給雲端 API，本地只負責「輸入 → 播放 → 擺頭」。
-代價是每輪約 1.5~2.5 秒延遲，用「思考動作」蓋掉大部分等待的體感。
+代價是每輪約 1.5~2.5 秒延遲。等待期間頭會繼續追著人臉看（追臉跑在 daemon 端
+的 YuNet，單執行緒 320px，不是 YOLO 那種吃效能的做法）。
 
     使用者輸入 ─┬─ 打字（預設，麥克風故障期間唯一可用路徑）
                 └─ 麥克風錄音 → 雲端 Whisper API（--input mic，修好後才可用）
@@ -21,8 +22,9 @@ r"""Reachy Mini 雲端三段式對話 Pipeline：STT → LLM → 工具 → TTS 
 
 工具
 ----
-工具定義在同目錄的 tools.py。目前只有一個：weather_taipei（台北市即時天氣，
-走 Open-Meteo，免金鑰）。模型自己決定要不要用；用了會多一次雲端往返，約 +1 秒。
+工具定義在同目錄的 tools.py，目前兩個：weather_taipei（台北市即時天氣，走
+Open-Meteo）與 web_search（關鍵字上網搜尋，走 DuckDuckGo lite）。兩個都免金鑰。
+模型自己決定要不要用；用了會多一次雲端往返，約 +1 到 2 秒。
 
 ⚠️ 本機麥克風硬體故障（XVF3800 收不到麥克風陣列訊號，見 test_microphone.py 的
    歷史基準）。因此 --input 預設是 text；改用 mic 之前請先跑一次診斷確認修好了。
@@ -46,6 +48,7 @@ r"""Reachy Mini 雲端三段式對話 Pipeline：STT → LLM → 工具 → TTS 
     python src/agent_system/cloud_voice_chat.py --input mic     # 麥克風修好後才有意義
 
     python src/agent_system/tools.py                            # 單獨測工具
+    python src/agent_system/web_ui.py                           # 瀏覽器介面（同一條 pipeline）
 
 執行前請確認 daemon 已啟動（desktop app 或 `uv run reachy-mini-daemon`）。
 """
@@ -54,12 +57,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 import re
 import sys
 import tempfile
+import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -84,17 +90,13 @@ if not sys.stdin.isatty():
 import httpx  # noqa: E402
 
 # 同目錄的工具模組。以腳本方式執行時 sys.path[0] 就是這個資料夾，直接 import 得到。
-from tools import TOOL_SPECS, run_tool, tool_menu  # noqa: E402
+from tools import TOOL_SPECS, VISION_TOOL, run_tool, tool_menu  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 常數
 # ---------------------------------------------------------------------------
 
 EMOTIONS_DATASET = "pollen-robotics/reachy-mini-emotions-library"
-
-# _cloud_work() 的回傳：(台詞, 情緒代號, mp3, LLM 秒數, TTS 秒數, 工具紀錄)
-# 工具紀錄的每一筆是 (工具名, 回傳字串, 耗時秒數)。
-CloudResult = tuple[str, str, Path, float, float, list[tuple[str, str, float]]]
 
 # 給 LLM 挑選的情緒白名單。刻意只收「短動作」（約 2~4 秒）：
 # 太長的動作（curious1 11.8s、boredom1 15.7s）會讓對話節奏整個卡死。
@@ -123,11 +125,16 @@ EMOTION_MENU: dict[str, str] = {
     "none": "不做動作，只說話",
 }
 
-# 等 LLM 回覆時播的動作（不出聲，純馬達），用來蓋掉雲端往返的延遲。
-THINKING_MOVE = "thoughtful1"
+# 追臉時頭部有多聽偵測結果的：1.0 = 完全由追臉決定朝向。
+# daemon 端是 linear_pose_interpolation(app 姿態, 追臉目標, weight)，
+# 所以 1.0 會整個蓋掉 app 自己下的頭部姿態——情緒動作期間要先暫停（見 Robot）。
+FACE_TRACKING_WEIGHT = 1.0
 
-# 終端機顯示動作名稱時用的中文對照（思考動作不在 LLM 的選單裡，另外補上）。
-MOVE_LABELS: dict[str, str] = {**EMOTION_MENU, THINKING_MOVE: "深思熟慮"}
+# workdir 裡保留幾個 TTS mp3（每個約 30 KB）。見 prune_clips()。
+KEEP_CLIPS = 50
+
+# 終端機顯示動作名稱時用的中文對照。
+MOVE_LABELS: dict[str, str] = dict(EMOTION_MENU)
 
 
 def move_label(name: str) -> str:
@@ -136,28 +143,41 @@ def move_label(name: str) -> str:
     return f"{name}（{desc}）" if desc else name
 
 
-SYSTEM_PROMPT = """你是 Reachy Mini，一台放在桌上的小型桌面機器人，正在和面前的人用繁體中文聊天。
+# 角色設定：人設歸人設，格式規則歸格式規則。分開之後，換角色（web_ui 讓使用者
+# 自己改）就不會連帶把輸出格式那段刪掉——那段一沒了，整條 pipeline 就只剩
+# 「抱歉，我剛剛沒想到要說什麼」。
+DEFAULT_ROLE = """你是 Reachy Mini，一台放在桌上的小型桌面機器人，正在和面前的人用繁體中文聊天。
 
-個性：好奇、友善、講話簡短有活力，像個話不多但很捧場的夥伴。
+個性：好奇、友善、講話簡短有活力，像個話不多但很捧場的夥伴。"""
+
+
+SYSTEM_PROMPT = """{role}
 
 規則：
 1. 一律用繁體中文（台灣用語）回覆。
 2. 回覆要短。1 到 2 句話，最多 60 個字，因為這段文字會被唸出來。
 3. 不要用 markdown、條列、表情符號或任何唸不出來的符號。
 4. 從情緒清單中挑一個最貼近這句話語氣的動作。
-5. 需要即時資料才答得出來的問題，一定要用工具查，不可以憑印象亂講。
+5. 需要即時資料才答得出來的問題，清單上有對應的工具就一定要用，不可以憑印象亂講；
+   清單上沒有對應的工具時就直接用你自己知道的回答，不要提到工具、也不要說你查不到。
 
 情緒清單（只能從中挑一個，填動作代號）：
 {emotion_menu}
 
 可用工具：
 {tool_menu}
-
+{memory}
 只輸出這個格式的 JSON，不要有其他文字：
 {{"say": "要說出口的話", "emotion": "動作代號", "tool": null}}
 
 不需要工具時 tool 填 null。要用工具時把 tool 填成工具代號，say 填空字串、
-emotion 填 none——系統會執行工具並把結果交給你，你再產生真正要說出口的那一句。"""
+emotion 填 none——系統會執行工具並把結果交給你，你再產生真正要說出口的那一句。
+工具選單上標著「要填 query」或「可填 query」的，就多一個 query 欄位，照它給的格式寫，像這樣：
+{{"say": "", "emotion": "none", "tool": "web_search", "query": "台北 捷運 票價"}}"""
+
+# 真的問不出一句話時的墊底台詞。只有在模型連續兩次都回空的 say 才會用到——
+# 平常（工具被關掉、模型亂編工具代號）都會先繞回去重問一次，見 LLM.reply()。
+FALLBACK_SAY = "抱歉，我剛剛沒想到要說什麼。"
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +196,7 @@ class Config:
     record_seconds: float = 5.0
     use_robot: bool = True
     use_emotion: bool = True
-    use_thinking_move: bool = True
+    use_face_tracking: bool = True
     history_turns: int = 8
     workdir: Path = field(
         default_factory=lambda: Path(tempfile.gettempdir()) / "reachy_chat"
@@ -193,7 +213,7 @@ class Config:
         模型會下架（gemini-2.0-flash 已於 2026 年停用），跑出 404 時用
         --model 指定新的即可，不必改程式。
         """
-        return "gpt-4o-mini" if self.provider == "openai" else "gemini-3.1-flash-lite"
+        return "gpt-5.4-mini" if self.provider == "openai" else "gemini-3.1-flash-lite"
 
 
 def _looks_set(value: str) -> bool:
@@ -236,7 +256,7 @@ def load_config(args: argparse.Namespace) -> Config:
         record_seconds=args.record_seconds,
         use_robot=not args.no_robot,
         use_emotion=not args.no_emotion,
-        use_thinking_move=not args.no_thinking_move,
+        use_face_tracking=not args.no_face_tracking,
         openai_key=os.getenv("OPENAI_API_KEY", ""),
         openai_base_url=os.getenv(
             "OPENAI_BASE_URL", "https://api.openai.com/v1"
@@ -294,8 +314,17 @@ class LLM:
         self.cfg = cfg
         menu = "\n".join(f"- {name}: {desc}" for name, desc in EMOTION_MENU.items())
         self.system_prompt = SYSTEM_PROMPT.format(
-            emotion_menu=menu, tool_menu=tool_menu()
+            role=DEFAULT_ROLE, emotion_menu=menu, tool_menu=tool_menu(), memory=""
         )
+        # None = 全部可用。web_ui 讓使用者逐個關掉工具時會指定一個子集：
+        # 關掉的工具不只要從選單消失，模型硬點也不能執行。
+        self.allowed_tools: Optional[set[str]] = None
+        # 抓一張鏡頭畫面的回呼，給 VISION_TOOL 用。這裡刻意不直接依賴
+        # Robot：LLM 只該知道「呼叫這個會拿到 JPEG bytes 或 None」，由外面
+        # （run_turn() / web_ui.py 的 Session）接上 Robot.get_frame_jpeg。
+        # 留 None 的話（例如 --no-robot、或還沒接上）VISION_TOOL 就跟工具
+        # 被關掉時走一樣的「老實說看不到」回應，不會讓對話卡住。
+        self.capture_image: Optional[Callable[[], Optional[bytes]]] = None
         # 保持連線重用，省掉每輪的 TLS 握手（對總延遲有感）。
         self.client = httpx.Client(timeout=60.0)
         # 模型不支援關閉 thinking 時會被設成 False，之後就不再帶那個欄位。
@@ -311,7 +340,7 @@ class LLM:
         """送出歷史對話，回傳 (say, emotion, 工具紀錄).
 
         模型要求用工具時就地執行，把結果接回對話再問一次。只給一輪：
-        目前只有一個工具，連兩次都想查通常是模型鬼打牆，多繞一圈只是白等 1 秒。
+        連查兩次通常是模型鬼打牆，多繞一圈只是白等好幾秒。
         """
         # 工具的一來一回只活在這次呼叫裡，不寫進真正的對話歷史，
         # 免得原始資料一直佔著 context。模型講出口的那句話還是會留在歷史裡，
@@ -319,45 +348,153 @@ class LLM:
         messages = list(history)
         trace: list[tuple[str, str, float]] = []
 
-        say, emotion, tool = self._parse(self._call(messages))
+        say, emotion, tool, query = self._parse(self._call(messages))
         if tool is None:
-            return say, emotion, trace
+            return say or FALLBACK_SAY, emotion, trace
+
+        allowed = set(TOOL_SPECS) if self.allowed_tools is None else self.allowed_tools
+        if tool not in allowed:
+            # 使用者把工具關掉了，或模型自己編了一個代號。這一輪的 say 幾乎都是
+            # 空的（模型以為拿到工具結果後還有機會講話），直接回傳等於丟一句罐頭
+            # 道歉給使用者。多問一次、叫它憑自己知道的回答，比裝作沒事好。
+            messages.append(
+                {"role": "assistant", "content": json.dumps({"tool": tool})}
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"[系統] 現在沒有 {tool} 這個工具可以用。不要再指定 tool，"
+                        "直接用你自己知道的回答就好。不要提到工具、不要說你查不到、"
+                        "也不要加上「可能不準」之類的但書，就照平常講話的樣子回答。"
+                        "這次 tool 一定要填 null。"
+                    ),
+                }
+            )
+            say, emotion, _, _ = self._parse(self._call(messages))
+            return say or FALLBACK_SAY, emotion, trace
+
+        if tool == VISION_TOOL:
+            # 鏡頭是特例：不像其他工具回一段文字，是抓一張畫面直接餵給模型的
+            # 視覺能力，所以在呼叫 run_tool() 之前就攔下來，見 _reply_with_vision()。
+            return self._reply_with_vision(messages, trace)
 
         t0 = time.perf_counter()
-        result = run_tool(tool)
-        trace.append((tool, result, time.perf_counter() - t0))
+        result = run_tool(tool, query)
+        # 紀錄裡帶上關鍵字：介面（跟終端機）要看得出它到底去查了什麼，
+        # 「模型自己把問句改寫成什麼關鍵字」正是這一段最值得看的地方。
+        label = f"{tool}（{query}）" if query else tool
+        trace.append((label, result, time.perf_counter() - t0))
 
-        messages.append({"role": "assistant", "content": json.dumps({"tool": tool})})
+        messages.append(
+            {
+                "role": "assistant",
+                "content": json.dumps(
+                    {"tool": tool, "query": query} if query else {"tool": tool}
+                ),
+            }
+        )
         messages.append(
             {
                 "role": "user",
                 "content": (
-                    f"[工具結果] {tool}：{result} "
+                    f"[工具結果] {label}：{result} "
                     "請用這個結果回覆使用者，這次 tool 一定要填 null。"
                 ),
             }
         )
-        say, emotion, _ = self._parse(self._call(messages))
-        return say, emotion, trace
+        say, emotion, _, _ = self._parse(self._call(messages))
+        return say or FALLBACK_SAY, emotion, trace
 
-    def _call(self, messages: list[dict[str, str]]) -> str:
-        """依 provider 打對應的 API，回傳模型輸出的原始字串."""
+    def _reply_with_vision(
+        self, messages: list[dict[str, str]], trace: list[tuple[str, str, float]]
+    ) -> tuple[str, str, list[tuple[str, str, float]]]:
+        """處理 VISION_TOOL：抓一張鏡頭畫面，讓模型用視覺直接回答.
+
+        跟其他工具不同的地方只有這裡：不是把結果轉成一段文字塞回對話，
+        而是把 JPEG 影像本身當成這一輪追問的一部分送給模型（見 _call 的
+        image 參數）。沒有鏡頭可用時退化成跟「工具被關掉」一樣的老實回答，
+        不讓對話卡住。
+        """
+        t0 = time.perf_counter()
+        image = self.capture_image() if self.capture_image else None
+        dt = time.perf_counter() - t0
+
+        messages.append(
+            {"role": "assistant", "content": json.dumps({"tool": VISION_TOOL})}
+        )
+        if image is None:
+            trace.append((VISION_TOOL, "（沒有鏡頭畫面可看）", dt))
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "[系統] 現在沒有鏡頭畫面可看（可能沒連機器人，或沒偵測到鏡頭）。"
+                        "不要再指定 tool，直接跟使用者說你現在看不到畫面就好，"
+                        "這次 tool 一定要填 null。"
+                    ),
+                }
+            )
+            say, emotion, _, _ = self._parse(self._call(messages))
+            return say or FALLBACK_SAY, emotion, trace
+
+        trace.append((VISION_TOOL, f"（拍了一張畫面，{len(image)} bytes）", dt))
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "[鏡頭畫面] 這是你剛剛看到的畫面，請直接描述你看到什麼、"
+                    "並回答使用者原本的問題。這次 tool 一定要填 null。"
+                ),
+            }
+        )
+        say, emotion, _, _ = self._parse(self._call(messages, image=image))
+        return say or FALLBACK_SAY, emotion, trace
+
+    def _call(
+        self, messages: list[dict[str, str]], image: Optional[bytes] = None
+    ) -> str:
+        """依 provider 打對應的 API，回傳模型輸出的原始字串.
+
+        image 有值時會附掛在最後一則 user 訊息上（VISION_TOOL 專用），
+        兩家 API 的圖片欄位格式不同，各自的 _call_* 自己處理。
+        """
         return (
-            self._call_openai(messages)
+            self._call_openai(messages, image)
             if self.cfg.provider == "openai"
-            else self._call_gemini(messages)
+            else self._call_gemini(messages, image)
         )
 
-    def _call_openai(self, history: list[dict[str, str]]) -> str:
+    def _call_openai(
+        self, history: list[dict[str, str]], image: Optional[bytes] = None
+    ) -> str:
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self.system_prompt}
+        ]
+        for i, m in enumerate(history):
+            if image is not None and i == len(history) - 1 and m["role"] == "user":
+                b64 = base64.b64encode(image).decode("ascii")
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": m["content"]},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                            },
+                        ],
+                    }
+                )
+            else:
+                messages.append(m)
+
         resp = self.client.post(
             f"{self.cfg.openai_base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self.cfg.openai_key}"},
             json={
                 "model": self.cfg.model,
-                "messages": [
-                    {"role": "system", "content": self.system_prompt},
-                    *history,
-                ],
+                "messages": messages,
                 "temperature": 0.8,
                 "max_tokens": 200,
                 "response_format": {"type": "json_object"},
@@ -366,15 +503,28 @@ class LLM:
         resp.raise_for_status()
         return str(resp.json()["choices"][0]["message"]["content"])
 
-    def _call_gemini(self, history: list[dict[str, str]]) -> str:
+    def _call_gemini(
+        self, history: list[dict[str, str]], image: Optional[bytes] = None
+    ) -> str:
         # Gemini 的角色名是 user / model，且 system prompt 走獨立欄位。
-        contents = [
-            {
-                "role": "model" if m["role"] == "assistant" else "user",
-                "parts": [{"text": m["content"]}],
-            }
-            for m in history
-        ]
+        contents = []
+        for i, m in enumerate(history):
+            parts: list[dict[str, Any]] = [{"text": m["content"]}]
+            if image is not None and i == len(history) - 1 and m["role"] == "user":
+                parts.append(
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": base64.b64encode(image).decode("ascii"),
+                        }
+                    }
+                )
+            contents.append(
+                {
+                    "role": "model" if m["role"] == "assistant" else "user",
+                    "parts": parts,
+                }
+            )
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{self.cfg.model}:generateContent"
@@ -409,9 +559,8 @@ class LLM:
         resp.raise_for_status()
         return str(resp.json()["candidates"][0]["content"]["parts"][0]["text"])
 
-    @staticmethod
-    def _parse(raw: str) -> tuple[str, str, Optional[str]]:
-        """挖出 say / emotion / tool，格式跑掉時退化成「整段當台詞」."""
+    def _parse(self, raw: str) -> tuple[str, str, Optional[str], str]:
+        """挖出 say / emotion / tool / query，格式跑掉時退化成「整段當台詞」."""
         text = raw.strip()
         # 就算指定了 JSON 模式，有些相容服務還是會包上 ```json 圍欄。
         fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
@@ -423,17 +572,19 @@ class LLM:
             say = str(data.get("say", "")).strip()
             emotion = str(data.get("emotion", "none")).strip()
             tool = data.get("tool")
+            query = str(data.get("query") or "").strip()
         except (json.JSONDecodeError, AttributeError):
-            say, emotion, tool = text, "none", None
+            say, emotion, tool, query = text, "none", None, ""
 
         if emotion not in EMOTION_MENU:
             emotion = "none"  # 模型自己發明代號時，別讓 RecordedMoves 丟例外
 
-        # null、"null"、"none"、亂編的代號，一律當成不用工具。
+        # null、"null"、"none" 都是「不用工具」。名字對不對、能不能跑，
+        # 交給 reply() 判斷——這裡擋掉的話，它就沒機會叫模型改用別的方式回答。
         name = str(tool).strip() if tool else ""
-        if name in TOOL_SPECS:
-            return say, emotion, name  # 這一輪的 say 是過場話，不會被唸出來
-        return say or "抱歉，我剛剛沒想到要說什麼。", emotion, None
+        if name.lower() in ("", "null", "none"):
+            name = ""
+        return say, emotion, name or None, query
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +607,27 @@ def synthesize(text: str, voice: str, out_path: Path) -> Path:
 
     asyncio.run(_run())
     return out_path
+
+
+def prune_clips(workdir: Path, keep: int = KEEP_CLIPS) -> int:
+    """刪掉舊的 TTS mp3，只留最近的幾個，回傳刪掉幾個.
+
+    每輪都會在 workdir 生一個 mp3（約 30 KB），沒人清的話會一路長下去——
+    這裡是系統的暫存目錄，Windows 只有在手動跑磁碟清理或開了「儲存空間感知」
+    時才會動它，兩個預設都不會發生。
+
+    留 50 個是為了 web_ui：介面上每則回覆都掛著一個 <audio>，指回這些檔案。
+    立刻刪掉的話往回捲想重播就會 404（介面會顯示「音檔不存在」）。
+    """
+    clips = sorted(workdir.glob("reply_*.mp3"), key=lambda p: p.stat().st_mtime)
+    removed = 0
+    for path in clips[:-keep] if keep > 0 else clips:
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            pass  # 正在被播放器開著之類，下一輪再刪就好
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -503,13 +675,20 @@ def play_and_wait(mini: Any, path: Path, timeout_margin: float = 15.0) -> None:
 
 
 class Robot:
-    """包住 ReachyMini 的動作與播放。--no-robot 時整個退化成印字."""
+    """包住 ReachyMini 的動作、播放與鏡頭。--no-robot 時整個退化成印字."""
 
     def __init__(self, cfg: Config):
         """連線機器人並預載情緒動作庫（第一次會從 HuggingFace 下載）."""
         self.cfg = cfg
         self.mini: Any = None
         self.emotions: Any = None
+        # 追臉現在是不是開著。暫停期間（播情緒動作時）仍算 True，
+        # 因為那只是把 weight 調成 0，daemon 端的偵測器沒有被拆掉。
+        self.face_tracking = False
+        # 序列化鏡頭的 JPEG 編碼（GStreamer pipeline）：VISION_TOOL 跟
+        # web_ui 的即時鏡頭串流都會呼叫 get_frame_jpeg()，兩邊不該同時搶著
+        # 改同一條 pipeline 的狀態。
+        self.camera_lock = threading.Lock()
 
         if not cfg.use_robot:
             print("（--no-robot：不連機器人，語音只存檔不播放）")
@@ -541,6 +720,57 @@ class Robot:
             self.emotions = RecordedMoves(EMOTIONS_DATASET)
             print(f"✓ 情緒動作庫就緒（{len(self.emotions.list_moves())} 種）")
 
+        if cfg.use_face_tracking:
+            self.set_face_tracking(True)
+
+    def set_face_tracking(self, enabled: bool) -> bool:
+        """開關「看到人臉就轉頭看著他」，回傳實際的狀態.
+
+        偵測整個跑在 daemon 裡（YuNet ONNX，單執行緒、320px 輸入），
+        這邊只是送一個開關指令，不佔這支程式的 CPU，也不必自己抓影格。
+        沒有鏡頭時 daemon 會拒絕，所以先擋掉再送。
+        """
+        if self.mini is None:
+            return False
+        if enabled and self.mini.media.camera is None:
+            print("⚠️  沒有可用的鏡頭，追臉功能無法啟用。")
+            return False
+        try:
+            if enabled:
+                self.mini.start_head_tracking(weight=FACE_TRACKING_WEIGHT)
+                print("✓ 追臉已開啟（看到人臉就會轉頭看著他）")
+            else:
+                self.mini.stop_head_tracking()
+        except Exception as e:
+            print(f"  ！ 追臉切換失敗：{e}")
+            return self.face_tracking
+        self.face_tracking = enabled
+        return enabled
+
+    def pause_face_tracking(self) -> bool:
+        """暫停追臉，回傳「原本是開著的」——給呼叫端決定要不要恢復.
+
+        weight 設 0 而不是整個關掉：daemon 端的偵測執行緒會留著（只是不再
+        送出目標），下次恢復不用重新建 ONNX session，切換成本低很多。
+        """
+        if not self.face_tracking or self.mini is None:
+            return False
+        try:
+            self.mini.start_head_tracking(weight=0.0)
+        except Exception as e:
+            print(f"  ！ 暫停追臉失敗：{e}")
+            return False
+        return True
+
+    def resume_face_tracking(self) -> None:
+        """把暫停的追臉恢復成原本的 weight."""
+        if not self.face_tracking or self.mini is None:
+            return
+        try:
+            self.mini.start_head_tracking(weight=FACE_TRACKING_WEIGHT)
+        except Exception as e:
+            print(f"  ！ 恢復追臉失敗：{e}")
+
     def close(self) -> None:
         """回到原點後收線.
 
@@ -548,6 +778,8 @@ class Robot:
         """
         if self.mini is None:
             return
+        # 追臉要先停掉，否則它會把接下來的回原點指令蓋掉（weight=1 時完全覆蓋）。
+        self.set_face_tracking(False)
         try:
             self.mini.cancel_move()
             self.go_home()
@@ -556,9 +788,24 @@ class Robot:
         self.mini.__exit__(None, None, None)
 
     def cancel_move(self) -> None:
-        """中斷正在播的動作（思考動作等到雲端回來就該停）."""
+        """中斷正在播的動作."""
         if self.mini is not None:
             self.mini.cancel_move()
+
+    def get_frame_jpeg(self) -> Optional[bytes]:
+        """抓一張目前鏡頭畫面，編碼成 JPEG bytes；沒機器人或沒鏡頭就回 None.
+
+        給 LLM 的 VISION_TOOL 跟 web_ui 的即時鏡頭串流共用，用 camera_lock
+        序列化存取——GStreamer 的 JPEG 編碼器不是設計成給多個執行緒同時打的。
+        """
+        if self.mini is None or self.mini.media.camera is None:
+            return None
+        with self.camera_lock:
+            try:
+                frame: Optional[bytes] = self.mini.media.get_frame_jpeg()
+                return frame
+            except Exception:
+                return None
 
     def go_home(self, duration: float = 1.0) -> None:
         """回到中立姿勢（動作原點）.
@@ -691,52 +938,56 @@ def get_user_text(cfg: Config, robot: Robot) -> Optional[str]:
     return text
 
 
+@dataclass
+class TurnResult:
+    """一輪對話的產物.
+
+    CLI 自己會把該印的都印出來，用不到這個回傳值；web_ui.py 需要同一份資料
+    才能餵給前端（台詞、動作、工具紀錄、各段耗時、音檔路徑）。
+    """
+
+    say: str
+    emotion: str
+    mp3: Path
+    t_llm: float
+    t_tts: float
+    tools: list[tuple[str, str, float]]
+
+
 def run_turn(
     cfg: Config,
     llm: LLM,
     robot: Robot,
     history: list[dict[str, str]],
     user_text: str,
-) -> None:
+) -> TurnResult:
     """跑完一輪：LLM（可能夾一次工具查詢）→ TTS → 動作 + 語音 → 回原點.
 
-    LLM 與 TTS 丟到背景執行緒，同時播「思考中」動作，
-    把 1.5~2.5 秒的雲端往返藏在動作底下；雲端一回來就中斷它。
+    等雲端的這 1.5~2.5 秒不另外播動作：追臉開著時它本來就在看著人，
+    再疊一段預錄動作只會互相打架。
     """
     history.append({"role": "user", "content": user_text})
 
-    def _cloud_work() -> CloudResult:
-        t = time.perf_counter()
-        say, emotion, tools_used = llm.reply(history)
-        # 工具耗時從 LLM 那格扣掉，不然看不出到底是誰慢。
-        t_tool = sum(dt for _, _, dt in tools_used)
-        t_llm = time.perf_counter() - t - t_tool
+    t = time.perf_counter()
+    say, emotion, tools_used = llm.reply(history)
+    # 工具耗時從 LLM 那格扣掉，不然看不出到底是誰慢。
+    t_tool = sum(dt for _, _, dt in tools_used)
+    t_llm = time.perf_counter() - t - t_tool
 
-        t = time.perf_counter()
-        mp3 = synthesize(
-            say, cfg.voice, cfg.workdir / f"reply_{int(time.time() * 1000)}.mp3"
-        )
-        return say, emotion, mp3, t_llm, time.perf_counter() - t, tools_used
+    t = time.perf_counter()
+    mp3 = synthesize(
+        say, cfg.voice, cfg.workdir / f"reply_{int(time.time() * 1000)}.mp3"
+    )
+    # 順手清掉舊的，不然這個目錄會一路長下去（每輪 ~30 KB，沒人會去清）。
+    prune_clips(cfg.workdir)
+    t_tts = time.perf_counter() - t
 
-    use_thinking = cfg.use_thinking_move and robot.emotions is not None
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        cloud = pool.submit(_cloud_work)
-        # 思考動作也丟到背景：它比雲端往返還久（thoughtful1 有 5.9 秒），
-        # 讓它在主線程跑完的話反而變成瓶頸。雲端一回來就把它砍掉。
-        mover = (
-            pool.submit(robot.play_emotion, THINKING_MOVE, False, "🤔")
-            if use_thinking
-            else None
-        )
-        say, emotion, mp3, t_llm, t_tts, tools_used = cloud.result()
-        if mover is not None:
-            robot.cancel_move()
-            mover.result()
-
-    # 工具是在背景執行緒裡跑的，統一在這裡印，才不會跟思考動作的訊息交錯。
     timing = [f"LLM {t_llm:.2f}s"]
     for name, result, dt in tools_used:
-        print(f"  🛠️ {name}（{dt:.2f}s）→ {result}")
+        # 搜尋結果有好幾行，終端機只印第一行加長度，完整內容照樣送進 LLM。
+        head = result.splitlines()[0] if result else ""
+        tail = f"…（共 {len(result)} 字）" if len(result) > len(head) else ""
+        print(f"  🛠️ {name}（{dt:.2f}s）→ {head}{tail}")
         timing.append(f"工具 {dt:.2f}s")
     timing.append(f"TTS {t_tts:.2f}s")
     print(f"Reachy > {say}   [{' + '.join(timing)}]")
@@ -751,15 +1002,28 @@ def run_turn(
     if len(history) > cfg.history_turns * 2:
         del history[: len(history) - cfg.history_turns * 2]
 
-    # 動作與語音同時跑：情緒動作寫的是目標姿態，說話擺頭是疊加在那之上的
-    # offset（見 CONTROL_CHAIN.md 的 IK 段），兩者不會互相蓋掉。
-    # 串行播的話要多等一整段動作的時間（2~4 秒）。
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        mover = pool.submit(robot.play_emotion, emotion)
-        robot.speak(mp3)
-        mover.result()
+    # 情緒動作跟追臉都在寫頭部姿態，weight=1 時追臉會整個蓋掉動作，
+    # 所以這段先把追臉停在一旁，講完回原點後再放它回來繼續看人。
+    tracking_paused = robot.pause_face_tracking()
+    try:
+        # 動作與語音同時跑：情緒動作寫的是目標姿態，說話擺頭是疊加在那之上的
+        # offset（見 CONTROL_CHAIN.md 的 IK 段），兩者不會互相蓋掉。
+        # 串行播的話要多等一整段動作的時間（2~4 秒）。
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            # use_emotion 要在這裡看，不能只靠 Robot 有沒有載入動作庫：
+            # 動作庫是啟動時決定的，這個開關則可以在對話中途被關掉（web_ui 就會）。
+            mover = pool.submit(
+                robot.play_emotion, emotion if cfg.use_emotion else "none"
+            )
+            robot.speak(mp3)
+            mover.result()
 
-    robot.go_home()  # 每輪收在同一個姿態，下一輪才不會從奇怪的角度開始
+        robot.go_home()  # 每輪收在同一個姿態，下一輪才不會從奇怪的角度開始
+    finally:
+        if tracking_paused:
+            robot.resume_face_tracking()
+
+    return TurnResult(say, emotion, mp3, t_llm, t_tts, tools_used)
 
 
 def main() -> None:
@@ -775,7 +1039,7 @@ def main() -> None:
         help="雲端 LLM 供應商（預設 auto：看 .env 裡填了哪把金鑰）",
     )
     parser.add_argument(
-        "--model", default="", help="模型名稱（預設 gpt-4o-mini / gemini-2.0-flash）"
+        "--model", default="", help="模型名稱（預設 gpt-5.4-mini / gemini-3.1-flash-lite）"
     )
     parser.add_argument(
         "--voice", default="zh-TW-HsiaoChenNeural", help="edge-tts 語音"
@@ -797,7 +1061,7 @@ def main() -> None:
         "--no-emotion", action="store_true", help="不播預錄情緒動作（跳過動作庫下載）"
     )
     parser.add_argument(
-        "--no-thinking-move", action="store_true", help="等 LLM 時不播思考動作"
+        "--no-face-tracking", action="store_true", help="不要看到人臉就轉頭看著他"
     )
     args = parser.parse_args()
 
@@ -812,6 +1076,7 @@ def main() -> None:
 
     llm = LLM(cfg)
     robot = Robot(cfg)
+    llm.capture_image = robot.get_frame_jpeg
     history: list[dict[str, str]] = []
 
     def _safe_turn(text: str) -> None:

@@ -1,0 +1,1223 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reachy Mini Agent 控制台</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --panel-2: #f8f9fb;
+    --line: #e2e5ea;
+    --text: #1a1d21;
+    --muted: #6b7280;
+    --accent: #2f6feb;
+    --ok: #17803d;
+    --warn: #b45309;
+    --err: #c0392b;
+    /* 每個區塊一個顏色，掃一眼就知道自己在看哪一塊 */
+    --c-conn: #7c5cff;
+    --c-role: #d2603a;
+    --c-mem: #0e7490;
+    --c-hist: #6d5bd0;
+    --c-tool: #c07000;
+    --c-prompt: #2f6feb;
+    --c-set: #0f8b7e;
+    --c-emo: #c2417a;
+    --c-chat: #17803d;
+    --c-cam: #2563eb;
+    --c-adjust: #525252;
+    --radius: 10px;
+    --mono: ui-monospace, "Cascadia Mono", "Consolas", "Noto Sans Mono CJK TC", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181d;
+      --panel: #1d2127;
+      --panel-2: #232830;
+      --line: #333a45;
+      --text: #e6e9ee;
+      --muted: #98a1b0;
+      --accent: #6a9bff;
+      --ok: #57c98a;
+      --warn: #e0a33f;
+      --err: #ff8a80;
+      --c-conn: #a78bfa;
+      --c-role: #f0885f;
+      --c-mem: #38bdf8;
+      --c-hist: #a78bfa;
+      --c-tool: #e0a33f;
+      --c-prompt: #6a9bff;
+      --c-set: #45c9b8;
+      --c-emo: #f07bb0;
+      --c-chat: #57c98a;
+      --c-cam: #3b82f6;
+      --c-adjust: #a3a3a3;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.6 system-ui, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    padding: 12px 18px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 650; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+  .chip {
+    font-size: 12px; padding: 3px 9px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+    white-space: nowrap;
+  }
+  .chip b { color: var(--text); font-weight: 600; }
+  .chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+  .chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+  .chip.err { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+  .chip.role { color: var(--c-role); border-color: color-mix(in srgb, var(--c-role) 45%, var(--line)); }
+  .chip.mem { color: var(--c-mem); border-color: color-mix(in srgb, var(--c-mem) 45%, var(--line)); }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr minmax(340px, 460px);
+    gap: 16px;
+    padding: 16px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+  /* --- 區塊：顏色由各自的 --sec 決定 --- */
+  section {
+    --sec: var(--accent);
+    background: var(--panel);
+    border: 1px solid color-mix(in srgb, var(--sec) 42%, var(--line));
+    border-top: 3px solid var(--sec);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  section.conn   { --sec: var(--c-conn); }
+  section.role   { --sec: var(--c-role); }
+  section.mem    { --sec: var(--c-mem); }
+  section.hist   { --sec: var(--c-hist); }
+  section.tools  { --sec: var(--c-tool); }
+  section.prompt { --sec: var(--c-prompt); }
+  section.set    { --sec: var(--c-set); }
+  section.emo    { --sec: var(--c-emo); }
+  section.chat   { --sec: var(--c-chat); }
+  section.cam    { --sec: var(--c-cam); }
+  section.adjust { --sec: var(--c-adjust); }
+
+  .head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px;
+    background: color-mix(in srgb, var(--sec) 11%, var(--panel-2));
+    border-bottom: 1px solid color-mix(in srgb, var(--sec) 30%, var(--line));
+  }
+  .head h2 { font-size: 13px; margin: 0; font-weight: 650; letter-spacing: .02em; color: var(--sec); }
+  .head .sub { font-size: 12px; color: var(--muted); }
+  .head .right { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .body { padding: 14px; }
+  .body > * + * { margin-top: 10px; }
+
+  button {
+    font: inherit; font-size: 13px;
+    padding: 5px 12px; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--panel);
+    color: var(--text); cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--sec, var(--accent)); color: var(--sec, var(--accent)); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary {
+    background: var(--sec, var(--accent));
+    border-color: var(--sec, var(--accent));
+    color: #fff;
+  }
+  @media (prefers-color-scheme: dark) { button.primary { color: #14171c; font-weight: 600; } }
+  button.primary:hover:not(:disabled) { filter: brightness(1.1); color: inherit; }
+  button.tiny { padding: 2px 9px; font-size: 12px; }
+  button.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err); }
+
+  textarea, input[type=text], input[type=password], input[type=number], select {
+    width: 100%; font: inherit; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 7px; padding: 8px 10px;
+  }
+  textarea { font-size: 13px; line-height: 1.6; resize: vertical; }
+  textarea.code { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
+  textarea:focus, input:focus, select:focus {
+    outline: 2px solid color-mix(in srgb, var(--sec, var(--accent)) 30%, transparent);
+    border-color: var(--sec, var(--accent));
+  }
+
+  .hint { font-size: 12px; color: var(--muted); }
+  .hint.warnbox {
+    border-left: 3px solid var(--warn); padding: 6px 10px; border-radius: 0 6px 6px 0;
+    background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--text);
+  }
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel-2);
+         border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  label.field { display: block; font-size: 12px; color: var(--muted); }
+  label.field > span { display: block; margin-bottom: 4px; }
+  label.field.histturns { max-width: 220px; }
+  label.check { display: flex; gap: 8px; align-items: center; font-size: 13px; cursor: pointer; }
+  label.check input { accent-color: var(--sec, var(--accent)); width: 15px; height: 15px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  .status { font-size: 12px; padding: 6px 10px; border-radius: 6px;
+            background: color-mix(in srgb, var(--sec) 10%, var(--panel-2)); }
+  .status.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  .status.err { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+
+  /* 記憶 */
+  .mem-item {
+    display: flex; gap: 8px; align-items: flex-start;
+    border: 1px solid var(--line); border-left: 3px solid var(--sec);
+    border-radius: 0 8px 8px 0; padding: 8px 10px; background: var(--panel-2);
+  }
+  .mem-item + .mem-item { margin-top: 8px; }
+  .mem-item.off { opacity: .5; }
+  .mem-item.off .mem-text { text-decoration: line-through; }
+  .mem-text { flex: 1; min-width: 0; font-size: 13px; word-break: break-word; }
+  .mem-tag {
+    display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 4px;
+    /* inline-block 是有意的：停用時整行有刪除線，行內元素擋不掉（會被繼承），
+       inline-block 自成一塊才不會被劃到。 */
+    font-size: 11px; vertical-align: 1px;
+    color: var(--sec); border: 1px solid color-mix(in srgb, var(--sec) 45%, var(--line));
+  }
+  .mem-item input[type=text] { flex: 1; }
+
+  /* 工具 */
+  .tool { border: 1px solid var(--line); border-left: 3px solid var(--sec);
+          border-radius: 0 8px 8px 0; padding: 10px 12px; background: var(--panel-2); }
+  .tool + .tool { margin-top: 8px; }
+  .tool.off { opacity: .55; border-left-color: var(--line); }
+  .tool .name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .tool .desc { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  /* query 輸入框自己一列：跟說明擠同一列的話，說明會被壓成一條細長的字柱。 */
+  .tool .row + .row { margin-top: 8px; }
+  .tool .tool-q { flex: 1; min-width: 0; font-size: 12.5px; padding: 4px 8px; }
+  .tool .out {
+    margin-top: 8px; padding: 8px 10px; border-radius: 6px;
+    background: color-mix(in srgb, var(--sec) 12%, transparent);
+    font-size: 12.5px; white-space: pre-wrap;
+    /* 搜尋結果有好幾行、也可能有很長的網址，別讓它把版面撐開。 */
+    max-height: 260px; overflow: auto; overflow-wrap: anywhere;
+  }
+  .tool .out.err { background: color-mix(in srgb, var(--err) 15%, transparent); color: var(--err); }
+
+  /* 鏡頭：整塊 section 跟 #chat 一樣高，.camwrap 撐滿剩餘空間。 */
+  section.cam { display: flex; flex-direction: column; height: min(80vh, 900px); min-height: 360px; }
+  section.cam .body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .camwrap {
+    position: relative; width: 100%; flex: 1; min-height: 0;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    overflow: hidden; display: flex; align-items: center; justify-content: center;
+  }
+  .camwrap img { width: 100%; height: 100%; object-fit: contain; }
+  .camwrap .hint { padding: 0 16px; text-align: center; margin: 0; }
+
+  .sliders { display: flex; flex-direction: column; gap: 8px; }
+  /* flex 容器裡 margin 不會摺疊，<p> 預設的上下 margin 會整個疊在 gap 上，
+     那一列就比其他列高一截。清掉之後每一列的間距才真的是 gap 決定的。 */
+  .sliders > p { margin: 0; }
+  .slider-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  @media (max-width: 520px) { .slider-row { grid-template-columns: 1fr; } }
+  input[type=range] { width: 100%; accent-color: var(--sec, var(--accent)); }
+  input[type=range]:disabled { opacity: .5; }
+
+  .emolist { display: flex; flex-wrap: wrap; gap: 6px; }
+  .emo-tag { font-size: 12px; padding: 2px 8px; border-radius: 999px;
+             background: var(--panel-2); border: 1px solid color-mix(in srgb, var(--sec) 30%, var(--line)); }
+  .emo-tag b { font-family: var(--mono); font-weight: 600; color: var(--sec); }
+
+  details summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+  details pre {
+    margin: 8px 0 0; padding: 10px; max-height: 260px; overflow: auto;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
+    font-family: var(--mono); font-size: 12px; white-space: pre-wrap;
+  }
+  details > *:not(summary) { margin-top: 10px; }
+
+  /* 對話 */
+  /* 縮小一點高度給下面的鏡頭視窗留位置，不然要一路捲下去才看得到。 */
+  #chat { display: flex; flex-direction: column; height: min(80vh, 900px); min-height: 360px; }
+  #log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 88%; }
+  .msg.user { align-self: flex-end; }
+  .bubble { padding: 9px 13px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
+  .msg.user .bubble { background: var(--c-chat); color: #fff; border-bottom-right-radius: 3px; }
+  @media (prefers-color-scheme: dark) { .msg.user .bubble { color: #14171c; } }
+  .msg.bot .bubble { background: var(--panel-2); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+  .msg.sys .bubble { background: transparent; border: 1px dashed var(--line); color: var(--muted); font-size: 12.5px; }
+  .msg.err .bubble { background: color-mix(in srgb, var(--err) 14%, transparent); border: 1px solid var(--err); color: var(--err); }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+  .tag { padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); }
+  .tag.emo { color: var(--c-emo); border-color: color-mix(in srgb, var(--c-emo) 45%, var(--line)); }
+  .tag.tool { color: var(--c-tool); border-color: color-mix(in srgb, var(--c-tool) 45%, var(--line)); }
+  .toolcall { margin-top: 6px; padding: 7px 10px; border-left: 3px solid var(--c-tool);
+              background: var(--panel-2); border-radius: 0 6px 6px 0; font-size: 12.5px; }
+  audio { margin-top: 8px; width: 260px; max-width: 100%; height: 32px; }
+  .composer { border-top: 1px solid var(--line); padding: 10px 12px; display: flex; gap: 8px; align-items: flex-end; }
+  .composer textarea { font-size: 14px; min-height: 44px; max-height: 160px; }
+  .dots::after { content: "…"; animation: dots 1.2s steps(4, end) infinite; }
+  @keyframes dots { 0% { content: "" } 25% { content: "." } 50% { content: ".." } 75% { content: "…" } }
+  .saved { font-size: 12px; color: var(--ok); }
+  .dirty { font-size: 12px; color: var(--warn); }
+
+  /* 設定按鈕（左上角）與側邊抽屜 */
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; padding: 0; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    cursor: pointer; flex: none;
+  }
+  .iconbtn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .drawer-overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, .35);
+    opacity: 0; pointer-events: none; transition: opacity .25s ease; z-index: 20;
+  }
+  .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+
+  /* 從右邊滑入：關著時整塊推到視窗右側外面，開了才移回 0。
+     box-shadow 只在打開時才加：關著時 left 邊緣剛好卡在視窗右緣，
+     陰影的模糊半徑會往左暈進主畫面，變成怎麼關都關不掉的一道黑影。 */
+  .drawer {
+    position: fixed; top: 0; right: 0; height: 100vh; width: min(92vw, 460px);
+    background: var(--bg); border-left: 1px solid var(--line);
+    transform: translateX(100%); transition: transform .28s ease;
+    z-index: 21; display: flex; flex-direction: column;
+  }
+  .drawer.open { transform: translateX(0); box-shadow: -8px 0 24px rgba(0, 0, 0, .18); }
+  .drawer-head {
+    display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
+  }
+  .drawer-head h2 { margin: 0 auto 0 0; font-size: 14px; }
+  /* min-height: 0 是關鍵：flex 子項預設 min-height:auto，會被內容撐開而不是
+     觸發捲動，抽屜看起來就會變成所有區塊擠成一長條。 */
+  /* overscroll-behavior: contain：捲到抽屜盡頭時不要接著去捲後面的主畫面。 */
+  .drawer-body {
+    flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    padding: 16px; display: flex; flex-direction: column; gap: 16px;
+  }
+  /* 區塊不准被壓扁：flex 子項預設 flex-shrink:1，高度不夠時會一起縮，加上
+     section 的 overflow:hidden 就變成每一塊都被裁掉一半、整條還是捲不動。
+     固定住高度，內容才會真的溢出去，上面那個 overflow-y 才捲得起來。 */
+  .drawer-body > section { flex: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Reachy Mini · Agent 控制台</h1>
+  <div class="chips" id="chips"></div>
+  <button class="iconbtn" id="btnDrawer" aria-label="開啟設定" title="設定">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+      <line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2" fill="var(--panel)"/>
+      <line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2" fill="var(--panel)"/>
+      <line x1="4" y1="18" x2="20" y2="18"/><circle cx="11" cy="18" r="2" fill="var(--panel)"/>
+    </svg>
+  </button>
+</header>
+
+<main>
+  <!-- 左欄：鏡頭 -->
+  <div class="col">
+    <section class="cam">
+      <div class="head">
+        <h2>即時鏡頭</h2>
+        <div class="right"><span class="sub" id="camStatus"></span></div>
+      </div>
+      <div class="body">
+        <div class="camwrap">
+          <img id="camImg" alt="Reachy Mini 鏡頭畫面" hidden>
+          <p class="hint" id="camHint">尚未連線。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="adjust">
+      <div class="head">
+        <h2>畫面與聲音調整</h2>
+      </div>
+      <div class="body">
+        <!-- 畫面與音量放同一個 .sliders：共用一個 gap，每一列的間距才會一致。 -->
+        <div class="sliders">
+          <div class="slider-row">
+            <label class="field"><span>亮度 <b id="camBrightnessVal">150%</b></span>
+              <input type="range" id="camBrightness" min="50" max="200" value="150"></label>
+            <label class="field"><span>對比 <b id="camContrastVal">100%</b></span>
+              <input type="range" id="camContrast" min="50" max="150" value="100"></label>
+            <label class="field"><span>飽和度 <b id="camSaturateVal">130%</b></span>
+              <input type="range" id="camSaturate" min="0" max="200" value="130"></label>
+          </div>
+          <div class="row">
+            <button class="tiny" id="btnCamReset">重設畫面</button>
+          </div>
+          <label class="field"><span>喇叭音量 <b id="camVolumeVal">–</b></span>
+            <input type="range" id="camVolume" min="0" max="100" value="50" disabled></label>
+          <p class="hint" id="camVolumeHint">沒有連機器人，無法調整喇叭音量。</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 右欄：對話。其他設定收進左上角按鈕點開的側邊抽屜 -->
+  <div class="col">
+
+    <section class="chat" id="chat">
+      <div class="head">
+        <h2>對話</h2>
+        <div class="right">
+          <span class="sub" id="turnCount"></span>
+          <button class="tiny" id="btnClear">清空歷史</button>
+        </div>
+      </div>
+      <div id="log"></div>
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="輸入訊息，Enter 送出，Shift+Enter 換行"></textarea>
+        <button class="primary" id="btnSend">送出</button>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-head">
+    <h2>設定</h2>
+    <button class="iconbtn" id="btnDrawerClose" aria-label="關閉設定">✕</button>
+  </div>
+  <div class="drawer-body">
+
+    <section class="conn">
+      <div class="head">
+        <h2>連線與模型</h2>
+      </div>
+      <div class="body">
+        <div class="grid2">
+          <label class="field"><span>供應商</span>
+            <select id="provider">
+              <option value="openai">OpenAI</option>
+              <option value="gemini">Google Gemini</option>
+            </select>
+          </label>
+          <label class="field"><span>模型</span>
+            <input type="text" id="model" list="modelList" spellcheck="false" placeholder="gpt-5.4-mini">
+            <datalist id="modelList"></datalist>
+          </label>
+        </div>
+        <label class="field"><span id="keyLabel">API 金鑰</span>
+          <input type="password" id="apiKey" spellcheck="false" autocomplete="off"
+                 placeholder="貼上你自己的金鑰">
+        </label>
+        <div class="row">
+          <button class="primary" id="btnSaveCred">套用</button>
+          <button id="btnTestCred">測試連線</button>
+          <button id="btnClearCred">清除金鑰</button>
+        </div>
+        <div class="status" id="connStatus" hidden></div>
+      </div>
+    </section>
+
+    <section class="role">
+      <div class="head">
+        <h2>角色</h2>
+        <div class="right">
+          <span id="roleStatus" class="hint"></span>
+          <button class="tiny" id="btnResetRole">還原預設</button>
+          <button class="tiny primary" id="btnSaveRole">套用</button>
+        </div>
+      </div>
+      <div class="body">
+        <label class="field"><span>換一個現成人設</span>
+          <select id="rolePreset"></select>
+        </label>
+        <textarea id="role" rows="6" spellcheck="false"
+                  placeholder="你是誰、什麼個性、怎麼跟人講話"></textarea>
+        <p class="hint">
+          只寫「這個角色是誰」就好。講話長度、繁體中文、輸出格式那些規則在下面的
+          System prompt 裡，所以角色怎麼改都不會把 pipeline 弄壞。
+        </p>
+      </div>
+    </section>
+
+    <section class="mem">
+      <div class="head">
+        <h2>長期記憶</h2>
+        <div class="right"><span class="sub" id="memCount"></span></div>
+      </div>
+      <div class="body">
+        <div class="row">
+          <textarea id="memInput" rows="2" placeholder="例如：我住台北，每週三晚上有課，那天別安排事情。"
+                    style="flex:1"></textarea>
+        </div>
+        <div class="row">
+          <button class="primary" id="btnAddMem">記住這件事</button>
+          <span class="hint" id="memLimit"></span>
+        </div>
+        <div id="memList"></div>
+        <p class="hint">
+          每一輪都會被塞進 system prompt，所以寫「事實」比寫「故事」有效。
+          取消勾選＝暫時不用但留著。標著「範例」的兩條是內建的、預設關著，
+          勾起來再問一次同樣的問題，就看得出記憶怎麼影響回答（可以直接編輯或刪掉）。
+        </p>
+        <details>
+          <summary>看它代入 prompt 後長什麼樣</summary>
+          <pre id="memPreview"></pre>
+        </details>
+      </div>
+    </section>
+
+    <section class="hist">
+      <div class="head">
+        <h2>短期記憶</h2>
+        <div class="right"><span class="sub" id="histCount"></span></div>
+      </div>
+      <div class="body">
+        <label class="field histturns"><span>保留幾輪對話歷史</span>
+          <input type="number" id="historyTurns" min="1" max="50" step="1"></label>
+        <p class="hint">
+          每次送出時會把最近這幾輪的一問一答一起帶上，模型才知道「它」「剛剛那個」在指什麼。
+          超過的舊對話會自動被丟掉；設太大會變慢也比較花錢。
+          按對話區的「清空歷史」就立刻忘光，<strong>角色與長期記憶不受影響</strong>。
+        </p>
+      </div>
+    </section>
+
+    <section class="tools">
+      <div class="head">
+        <h2>工具</h2>
+        <div class="right"><span class="sub" id="toolCount"></span></div>
+      </div>
+      <div class="body">
+        <div id="tools"></div>
+        <p class="hint">
+          關掉的工具不會出現在 prompt 裡，模型硬點也不會被執行。
+          工具定義在 <code>src/agent_system/tools.py</code> 的 <code>TOOL_SPECS</code>／<code>TOOL_FUNCS</code>；
+          「試跑」是直接呼叫函式，不經過 LLM，也不用金鑰。
+          有輸入框的工具需要 query：對話時是模型自己把問句改寫成關鍵字或日期，
+          回覆下方的工具標籤會顯示它實際送了什麼。搜尋走 DuckDuckGo（免金鑰），
+          拿回來的是前幾筆的標題與摘要，不是網頁全文。
+          行事曆存在本機的 <code>src/agent_system/calendar.json</code>，
+          沒有連任何雲端服務，用文字編輯器就能打開看。
+        </p>
+      </div>
+    </section>
+
+    <section class="prompt">
+      <div class="head">
+        <h2>System prompt</h2>
+        <div class="right">
+          <span id="promptStatus" class="hint"></span>
+          <button class="tiny" id="btnResetPrompt">還原預設</button>
+          <button class="tiny primary" id="btnSavePrompt">套用</button>
+        </div>
+      </div>
+      <div class="body">
+        <p class="hint">進階：角色、情緒、工具、記憶被塞進去的那張骨架。平常只要改上面的「角色」就夠了。</p>
+        <details>
+          <summary>展開編輯</summary>
+          <textarea id="prompt" class="code" rows="16" spellcheck="false"></textarea>
+          <p class="hint">
+            <code>{role}</code>、<code>{memory}</code>、<code>{emotion_menu}</code>、<code>{tool_menu}</code>
+            送出前會自動代入。套用後<strong>下一輪</strong>生效，對話歷史不會被清掉。
+          </p>
+          <p class="hint warnbox">
+            最後那段 <code>{"say": ..., "emotion": ..., "tool": ...}</code> 的輸出格式別刪：
+            程式是照這三個欄位去取台詞、動作與工具的，格式跑掉就只會聽到「抱歉，我剛剛沒想到要說什麼」。
+          </p>
+          <p class="hint">實際送出的完整內容：</p>
+          <pre id="rendered"></pre>
+        </details>
+      </div>
+    </section>
+
+    <section class="set">
+      <div class="head"><h2>語音與動作</h2></div>
+      <div class="body">
+        <label class="field"><span>語音（tts）</span>
+          <select id="voice">
+            <option value="zh-TW-HsiaoChenNeural">曉臻（女聲）</option>
+            <option value="zh-TW-HsiaoYuNeural">曉雨（女聲）</option>
+            <option value="zh-TW-YunJheNeural">雲哲（男聲）</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="useEmotion"> 播預錄情緒動作</label>
+        <label class="check"><input type="checkbox" id="useFaceTracking"> 看到人臉就轉頭看著他<span class="hint" id="faceTrackingNote"></span></label>
+      </div>
+    </section>
+
+    <section class="emo">
+      <div class="head">
+        <h2>情緒清單</h2>
+        <div class="right"><span class="sub" id="emoCount"></span></div>
+      </div>
+      <div class="body">
+        <div class="emolist" id="emotions"></div>
+        <p class="hint">Reachy Mini 預錄 85 種動作，這邊選用其中 20 種。</p>
+      </div>
+    </section>
+
+  </div>
+</aside>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const SID_KEY = "reachyAgent.sessionId";
+
+/* 每個瀏覽器一組 id：後端據此分出各自的金鑰、角色、記憶與對話歷史。 */
+let sid = localStorage.getItem(SID_KEY);
+if (!sid) {
+  sid = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random());
+  localStorage.setItem(SID_KEY, sid);
+}
+
+let state = null;
+let busy = false;
+
+async function api(path, options = {}) {
+  options.headers = Object.assign({ "X-Session-Id": sid }, options.headers || {});
+  const res = await fetch(path, options);
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (_) { data = { detail: text }; }
+  if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+  return data;
+}
+
+const send_ = (method) => (path, body) => api(path, {
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body || {}),
+});
+const post = send_("POST");
+const patch = send_("PATCH");
+const del = (path) => api(path, { method: "DELETE" });
+
+const fmt = (s) => `${s.toFixed(2)}s`;
+const escape = (s) => String(s).replace(/[&<>"]/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ---------- 側邊抽屜（連線、角色、記憶、工具、prompt、語音動作、情緒） ---------- */
+
+function openDrawer() {
+  $("drawer").classList.add("open");
+  $("drawerOverlay").classList.add("open");
+}
+
+function closeDrawer() {
+  $("drawer").classList.remove("open");
+  $("drawerOverlay").classList.remove("open");
+}
+
+$("btnDrawer").addEventListener("click", openDrawer);
+$("btnDrawerClose").addEventListener("click", closeDrawer);
+$("drawerOverlay").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeDrawer();
+});
+
+/* ---------- 畫面 ---------- */
+
+function renderChips() {
+  const c = state.connection;
+  const a = state.agent;
+  const r = state.robot;
+  const active = a.memories.filter((m) => m.enabled).length;
+  const tools = a.tools.filter((t) => t.enabled).length;
+  const keyChip = c.key_ok
+    ? `<span class="chip ok">● 金鑰 ${c.key_masked}${c.key_from_server ? "（伺服器提供）" : ""}</span>`
+    : `<span class="chip err">● 尚未設定金鑰</span>`;
+  $("chips").innerHTML = [
+    `<span class="chip"><b>${escape(c.provider)}</b> / ${escape(c.model)}</span>`,
+    keyChip,
+    `<span class="chip role">😼 ${escape(a.role_name)}</span>`,
+    `<span class="chip mem">🧠 記憶 ${active}/${a.memories.length}</span>`,
+    `<span class="chip">🛠️ 工具 ${tools}/${a.tools.length}</span>`,
+    r.connected
+      ? `<span class="chip ok">● 機器人已連線${r.emotions_loaded ? "" : "（無動作庫）"}</span>`
+      : `<span class="chip warn">● 未連機器人（語音只在瀏覽器播）</span>`,
+  ].join("");
+}
+
+function renderConnection() {
+  const c = state.connection;
+  $("provider").value = c.provider;
+  $("model").value = c.model;
+  $("modelList").innerHTML = (c.model_suggestions[c.provider] || [])
+    .map((m) => `<option value="${escape(m)}">`).join("");
+  $("keyLabel").textContent =
+    c.provider === "openai" ? "OpenAI API 金鑰" : "Gemini API 金鑰";
+  $("apiKey").placeholder = c.key_ok
+    ? `目前使用 ${c.key_masked}${c.key_from_server ? "（來自 .env）" : ""}，留空就不改`
+    : "貼上你自己的金鑰";
+}
+
+function renderRole() {
+  const a = state.agent;
+  $("role").value = a.role;
+  $("rolePreset").innerHTML =
+    `<option value="">— 選一個套用 —</option>` +
+    a.role_presets.map((p, i) => `<option value="${i}">${escape(p.name)}</option>`).join("");
+  /* 現在用的就是某個現成人設時，讓下拉選單直接顯示它，不要停在「選一個套用」。 */
+  const at = a.role_presets.findIndex((p) => p.role === a.role);
+  $("rolePreset").value = at >= 0 ? String(at) : "";
+  markRole(false);
+}
+
+function markRole(dirty) {
+  const el = $("roleStatus");
+  el.className = dirty ? "dirty" : "saved";
+  el.textContent = dirty ? "尚未套用" : `目前：${state.agent.role_name}`;
+}
+
+function renderMemories() {
+  const mems = state.agent.memories;
+  const lim = state.memory_limits;
+  $("memCount").textContent = `${mems.filter((m) => m.enabled).length} / ${mems.length} 條`;
+  $("memLimit").textContent = `最多 ${lim.max_items} 條，每條 ${lim.max_chars} 字`;
+  $("memPreview").textContent = state.agent.memory_preview || "（目前沒有啟用中的記憶，這段不會出現在 prompt 裡）";
+  $("memList").innerHTML = mems.map((m) => `
+    <div class="mem-item${m.enabled ? "" : " off"}" data-mem="${m.id}">
+      <label class="check" title="暫時停用">
+        <input type="checkbox" data-mem-toggle="${m.id}" ${m.enabled ? "checked" : ""}></label>
+      <div class="mem-text">${m.example ? `<span class="mem-tag">範例</span>` : ""}${escape(m.text)}</div>
+      <button class="tiny" data-mem-edit="${m.id}">編輯</button>
+      <button class="tiny danger" data-mem-del="${m.id}">刪除</button>
+    </div>`).join("") || `<p class="hint">還沒有任何記憶。上面打一句他該記得的事，按「記住這件事」。</p>`;
+
+  document.querySelectorAll("[data-mem-toggle]").forEach((el) =>
+    el.addEventListener("change", () =>
+      memAction(() => patch(`/api/memories/${el.dataset.memToggle}`, { enabled: el.checked }))));
+
+  document.querySelectorAll("[data-mem-del]").forEach((el) =>
+    el.addEventListener("click", () =>
+      memAction(() => del(`/api/memories/${el.dataset.memDel}`))));
+
+  document.querySelectorAll("[data-mem-edit]").forEach((el) =>
+    el.addEventListener("click", () => startEditMemory(el.dataset.memEdit)));
+}
+
+function startEditMemory(id) {
+  const row = document.querySelector(`[data-mem="${id}"]`);
+  const memory = state.agent.memories.find((m) => m.id === id);
+  if (!row || !memory) return;
+  row.innerHTML = `
+    <input type="text" value="${escape(memory.text)}" maxlength="${state.memory_limits.max_chars}">
+    <button class="tiny primary" data-save>儲存</button>
+    <button class="tiny" data-cancel>取消</button>`;
+  const box = row.querySelector("input");
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+  const save = () => memAction(() => patch(`/api/memories/${id}`, { text: box.value }));
+  row.querySelector("[data-save]").addEventListener("click", save);
+  row.querySelector("[data-cancel]").addEventListener("click", renderMemories);
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); save(); }
+    if (e.key === "Escape") renderMemories();
+  });
+}
+
+/* 記憶的每個動作後端都回同一包 agent 狀態，統一在這裡收。 */
+async function memAction(fn) {
+  try {
+    applyAgent(await fn());
+  } catch (e) {
+    addMsg("err", `<div class="bubble">✗ ${escape(e.message)}</div>`);
+    renderMemories();
+  }
+}
+
+function renderTools() {
+  const tools = state.agent.tools;
+  $("toolCount").textContent = `${tools.filter((t) => t.enabled).length} / ${tools.length} 個啟用`;
+  $("tools").innerHTML = tools.map((t) => `
+    <div class="tool${t.enabled ? "" : " off"}" data-tool="${escape(t.name)}">
+      <div class="row">
+        <label class="check" title="關掉後模型看不到，也不能用">
+          <input type="checkbox" data-tool-toggle="${escape(t.name)}" ${t.enabled ? "checked" : ""}></label>
+        <div style="flex:1;min-width:0">
+          <div class="name">${escape(t.name)}</div>
+          <div class="desc">${escape(t.description)}</div>
+        </div>
+        ${t.query_hint ? "" : `<button class="tiny" data-run="${escape(t.name)}">試跑</button>`}
+      </div>
+      ${t.query_hint ? `<div class="row">
+        <input type="text" data-q="${escape(t.name)}" class="tool-q"
+               placeholder="${escape(t.query_hint)}">
+        <button class="tiny" data-run="${escape(t.name)}">試跑</button>
+      </div>` : ""}
+      <div class="out" hidden></div>
+    </div>`).join("") || `<p class="hint">目前沒有註冊任何工具。</p>`;
+
+  document.querySelectorAll("[data-tool-toggle]").forEach((el) =>
+    el.addEventListener("change", async () => {
+      try {
+        applyAgent(await post(`/api/tools/${encodeURIComponent(el.dataset.toolToggle)}/toggle`,
+                              { enabled: el.checked }));
+      } catch (e) {
+        addMsg("err", `<div class="bubble">✗ ${escape(e.message)}</div>`);
+        renderTools();
+      }
+    }));
+
+  document.querySelectorAll("[data-run]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const name = btn.dataset.run;
+      const box = document.querySelector(`[data-tool="${name}"] .out`);
+      const qbox = document.querySelector(`[data-q="${name}"]`);
+      btn.disabled = true;
+      box.hidden = false;
+      box.className = "out";
+      box.textContent = "查詢中…";
+      try {
+        const r = await post(`/api/tools/${encodeURIComponent(name)}/run`,
+                             { query: qbox ? qbox.value : "" });
+        box.textContent = `${r.result}\n[${fmt(r.seconds)}]`;
+      } catch (e) {
+        box.className = "out err";
+        box.textContent = String(e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+function renderEmotions() {
+  $("emoCount").textContent = `${state.emotions.length} 種`;
+  $("emotions").innerHTML = state.emotions
+    .map((e) => `<span class="emo-tag"><b>${escape(e.name)}</b> · ${escape(e.label)}</span>`)
+    .join("");
+}
+
+function renderSettings() {
+  $("historyTurns").value = state.history_turns;
+  $("useEmotion").checked = state.use_emotion;
+  $("useFaceTracking").checked = state.use_face_tracking;
+  const sel = $("voice");
+  if (![...sel.options].some((o) => o.value === state.voice)) {
+    sel.add(new Option(state.voice, state.voice));
+  }
+  sel.value = state.voice;
+  if (!state.robot.emotions_loaded) {
+    $("useEmotion").disabled = true;
+    $("settingsHint").textContent =
+      "沒有載入動作庫（--no-robot / --no-emotion），情緒動作開關暫時無效。";
+  }
+  /* 追臉要的是鏡頭，跟動作庫無關：偵測跑在 daemon 端，沒鏡頭就整個做不到。 */
+  if (!state.robot.camera_available) {
+    $("useFaceTracking").disabled = true;
+    $("faceTrackingNote").textContent = "（沒有可用的鏡頭）";
+  } else {
+    $("faceTrackingNote").textContent = "（偵測跑在機器人端，不吃這台電腦效能）";
+  }
+}
+
+function renderCamera() {
+  const r = state.robot;
+  const img = $("camImg");
+  const hint = $("camHint");
+  const status = $("camStatus");
+  if (r.connected && r.camera_available) {
+    status.textContent = "● 直播中";
+    hint.hidden = true;
+    img.hidden = false;
+    // 加時間戳純粹是防瀏覽器把這個 multipart 串流當成靜態圖片快取住。
+    img.src = `/api/camera/stream?t=${Date.now()}`;
+    img.onerror = () => {
+      img.hidden = true;
+      hint.hidden = false;
+      hint.textContent = "串流中斷了，3 秒後自動重試。";
+      status.textContent = "已斷線";
+      setTimeout(renderCamera, 3000);
+    };
+  } else {
+    img.hidden = true;
+    hint.hidden = false;
+    hint.textContent = r.connected
+      ? "機器人已連線，但沒有偵測到鏡頭（daemon 可能沒開媒體）。"
+      : "沒有連機器人，沒有鏡頭畫面可看。";
+    status.textContent = "";
+  }
+}
+
+/* ---------- 相機濾鏡：純前端 CSS filter，不會改到鏡頭實際擷取的畫質 ---------- */
+
+const CAM_FILTER_KEY = "reachyAgent.camFilter";
+
+/* 預設值：Reachy 的鏡頭在室內偏暗偏灰，這組是實際看起來最接近肉眼的。
+   HTML 上滑桿的 value 要跟這裡一致，「重設畫面」也回到這一組。 */
+const CAM_FILTER_DEFAULT = { b: 150, c: 100, s: 130 };
+
+function loadCamFilter() {
+  try { return JSON.parse(localStorage.getItem(CAM_FILTER_KEY) || "{}"); } catch (_) { return {}; }
+}
+
+function applyCamFilter() {
+  const b = $("camBrightness").value, c = $("camContrast").value, s = $("camSaturate").value;
+  $("camBrightnessVal").textContent = `${b}%`;
+  $("camContrastVal").textContent = `${c}%`;
+  $("camSaturateVal").textContent = `${s}%`;
+  $("camImg").style.filter = `brightness(${b}%) contrast(${c}%) saturate(${s}%)`;
+  localStorage.setItem(CAM_FILTER_KEY, JSON.stringify({ b, c, s }));
+}
+
+function initCamFilter() {
+  const saved = loadCamFilter();
+  if (saved.b) $("camBrightness").value = saved.b;
+  if (saved.c) $("camContrast").value = saved.c;
+  if (saved.s) $("camSaturate").value = saved.s;
+  applyCamFilter();
+  ["camBrightness", "camContrast", "camSaturate"].forEach((id) =>
+    $(id).addEventListener("input", applyCamFilter));
+  $("btnCamReset").addEventListener("click", () => {
+    $("camBrightness").value = CAM_FILTER_DEFAULT.b;
+    $("camContrast").value = CAM_FILTER_DEFAULT.c;
+    $("camSaturate").value = CAM_FILTER_DEFAULT.s;
+    applyCamFilter();
+  });
+}
+
+/* ---------- 喇叭音量：真的打到 daemon 的 /volume，拖曳放開才送出 ---------- */
+
+async function initVolume() {
+  const slider = $("camVolume");
+  const val = $("camVolumeVal");
+  const hint = $("camVolumeHint");
+  if (!state.robot.connected) return; // 預設文字已經寫好「沒有連機器人」
+  try {
+    const r = await api("/api/audio/volume");
+    slider.value = r.volume;
+    val.textContent = `${r.volume}%`;
+    slider.disabled = false;
+    hint.textContent = `（更改音量會發出測試音）`;
+  } catch (e) {
+    hint.textContent = `讀取音量失敗：${e.message}`;
+  }
+
+  slider.addEventListener("input", () => { val.textContent = `${slider.value}%`; });
+  slider.addEventListener("change", async () => {
+    try {
+      const r = await post("/api/audio/volume", { volume: Number(slider.value) });
+      val.textContent = `${r.volume}%`;
+    } catch (e) {
+      hint.textContent = `設定音量失敗：${e.message}`;
+    }
+  });
+}
+
+function markPrompt(dirty) {
+  const el = $("promptStatus");
+  el.className = dirty ? "dirty" : "saved";
+  el.textContent = dirty ? "尚未套用" : (state.agent.is_default_template ? "預設值" : "已改過");
+}
+
+function renderPrompt() {
+  $("prompt").value = state.agent.template;
+  $("rendered").textContent = state.agent.rendered;
+  markPrompt(false);
+}
+
+/* 後端每個改動 agent 的端點都回同一包，收到就整個左欄重畫。 */
+function applyAgent(agent) {
+  state.agent = agent;
+  renderRole();
+  renderMemories();
+  renderTools();
+  renderPrompt();
+  renderChips();
+}
+
+function setTurns(n) {
+  state.turns = n;
+  $("turnCount").textContent = n ? `${n} 輪` : "";
+  $("histCount").textContent = n ? `目前記著 ${n} 輪` : "目前沒有對話";
+}
+
+function connStatus(text, kind) {
+  const el = $("connStatus");
+  el.hidden = !text;
+  el.className = "status" + (kind ? ` ${kind}` : "");
+  el.textContent = text;
+}
+
+/* ---------- 對話 ---------- */
+
+function addMsg(kind, html) {
+  const div = document.createElement("div");
+  div.className = `msg ${kind}`;
+  div.innerHTML = html;
+  $("log").appendChild(div);
+  $("log").scrollTop = $("log").scrollHeight;
+  return div;
+}
+
+function renderReply(node, r) {
+  const tools = r.tools.map((t) => `
+    <div class="toolcall">🛠️ <b>${escape(t.name)}</b>（${fmt(t.seconds)}）<br>${escape(t.result)}</div>`).join("");
+  const timing = [`LLM ${fmt(r.timings.llm)}`]
+    .concat(r.tools.map((t) => `工具 ${fmt(t.seconds)}`))
+    .concat([`TTS ${fmt(r.timings.tts)}`, `總計 ${fmt(r.timings.total)}`]);
+  node.className = "msg bot";
+  node.innerHTML = `
+    ${tools}
+    <div class="bubble">${escape(r.say)}</div>
+    <div class="meta">
+      <span class="tag emo">🎭 ${escape(r.emotion_label)}</span>
+      ${r.tools.map((t) => `<span class="tag tool">🛠️ ${escape(t.name)}</span>`).join("")}
+      <span class="tag">${timing.join(" + ")}</span>
+    </div>
+    <audio controls preload="none" src="${r.audio}"></audio>`;
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+async function sendMessage() {
+  const box = $("input");
+  const text = box.value.trim();
+  if (!text || busy) return;
+  busy = true;
+  $("btnSend").disabled = true;
+  box.value = "";
+  box.style.height = "auto";
+
+  addMsg("user", `<div class="bubble">${escape(text)}</div>`);
+  const pending = addMsg("bot", `<div class="bubble"><span class="dots">思考中</span></div>`);
+
+  try {
+    const r = await post("/api/chat", { text });
+    renderReply(pending, r);
+    setTurns(r.turns);
+  } catch (e) {
+    pending.className = "msg err";
+    pending.innerHTML = `<div class="bubble">✗ ${escape(e.message)}</div>`;
+  } finally {
+    busy = false;
+    $("btnSend").disabled = false;
+    box.focus();
+  }
+}
+
+/* ---------- 事件 ---------- */
+
+$("btnSend").addEventListener("click", sendMessage);
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+$("input").addEventListener("input", (e) => {
+  e.target.style.height = "auto";
+  e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px";
+});
+
+/* 連線 */
+
+$("provider").addEventListener("change", () => {
+  // 換家等於換模型與換金鑰：先問後端要新的預設值，再重畫這一塊。
+  applyCredentials({ provider: $("provider").value, model: "" });
+});
+
+async function applyCredentials(extra = {}) {
+  const body = Object.assign({
+    provider: $("provider").value,
+    model: $("model").value,
+    api_key: $("apiKey").value,
+  }, extra);
+  try {
+    state.connection = await post("/api/credentials", body);
+    $("apiKey").value = "";
+    renderConnection();
+    renderChips();
+    connStatus(
+      state.connection.key_ok
+        ? `已套用：${state.connection.provider} / ${state.connection.model}`
+        : "已套用，但還沒有可用的金鑰。",
+      state.connection.key_ok ? "ok" : "err"
+    );
+  } catch (e) {
+    connStatus(String(e.message), "err");
+  }
+}
+
+$("btnSaveCred").addEventListener("click", () => applyCredentials());
+
+$("btnTestCred").addEventListener("click", async () => {
+  const btn = $("btnTestCred");
+  btn.disabled = true;
+  connStatus("測試中…");
+  try {
+    const r = await post("/api/credentials/test");
+    connStatus(`✓ 通了：${r.provider} / ${r.model}（${fmt(r.seconds)}）`, "ok");
+  } catch (e) {
+    connStatus(`✗ ${e.message}`, "err");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("btnClearCred").addEventListener("click", async () => {
+  $("apiKey").value = "";
+  state.connection = await post("/api/credentials", { clear: true });
+  renderConnection();
+  renderChips();
+  connStatus("已清除金鑰。", "ok");
+});
+
+/* 角色 */
+
+$("role").addEventListener("input", () => markRole(true));
+
+$("rolePreset").addEventListener("change", (e) => {
+  const preset = state.agent.role_presets[Number(e.target.value)];
+  if (!preset) return;
+  $("role").value = preset.role;
+  markRole(true);
+});
+
+$("btnSaveRole").addEventListener("click", async () => {
+  try {
+    applyAgent(await post("/api/role", { role: $("role").value }));
+    addMsg("sys", `<div class="bubble">角色已更新，下一輪生效。</div>`);
+  } catch (e) {
+    addMsg("err", `<div class="bubble">✗ ${escape(e.message)}</div>`);
+  }
+});
+
+$("btnResetRole").addEventListener("click", async () => {
+  applyAgent(await post("/api/role/reset"));
+  addMsg("sys", `<div class="bubble">角色已還原成預設值。</div>`);
+});
+
+/* 記憶 */
+
+async function addMemory() {
+  const text = $("memInput").value.trim();
+  if (!text) return;
+  try {
+    applyAgent(await post("/api/memories", { text }));
+    $("memInput").value = "";
+  } catch (e) {
+    addMsg("err", `<div class="bubble">✗ ${escape(e.message)}</div>`);
+  }
+}
+
+$("btnAddMem").addEventListener("click", addMemory);
+$("memInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addMemory(); }
+});
+
+/* System prompt */
+
+$("prompt").addEventListener("input", () => markPrompt(true));
+
+$("btnSavePrompt").addEventListener("click", async () => {
+  try {
+    applyAgent(await post("/api/prompt", { template: $("prompt").value }));
+    addMsg("sys", `<div class="bubble">System prompt 已更新，下一輪生效。</div>`);
+  } catch (e) {
+    addMsg("err", `<div class="bubble">✗ ${escape(e.message)}</div>`);
+  }
+});
+
+$("btnResetPrompt").addEventListener("click", async () => {
+  applyAgent(await post("/api/prompt/reset"));
+  addMsg("sys", `<div class="bubble">System prompt 已還原成預設值。</div>`);
+});
+
+/* 對話與設定 */
+
+$("btnClear").addEventListener("click", async () => {
+  const r = await post("/api/history/reset");
+  $("log").innerHTML = "";
+  setTurns(r.turns);
+  addMsg("sys", `<div class="bubble">對話歷史已清空（角色與長期記憶保留）。</div>`);
+});
+
+async function pushSettings() {
+  const r = await post("/api/settings", {
+    voice: $("voice").value,
+    use_emotion: $("useEmotion").checked,
+    use_face_tracking: $("useFaceTracking").checked,
+    history_turns: Number($("historyTurns").value),
+  });
+  Object.assign(state, r);
+  renderChips();
+  renderSettings();
+}
+
+["voice", "historyTurns", "useEmotion", "useFaceTracking"].forEach((id) =>
+  $(id).addEventListener("change", () => pushSettings().catch((e) =>
+    addMsg("err", `<div class="bubble">✗ ${escape(e.message)}</div>`)))
+);
+
+/* ---------- 心跳：關掉網頁後讓伺服器自己收工 ---------- */
+
+/* 每開一個分頁一組新的 id（不進 localStorage）：後端要數的是「幾個分頁開著」，
+   同一個瀏覽器開兩個分頁時，關掉其中一個不該把另一個也收掉。 */
+const PAGE_ID = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random());
+const HEARTBEAT_MS = 5000;  /* 要跟 web_ui.py 的 HEARTBEAT_INTERVAL 一致 */
+
+function beat() {
+  post("/api/heartbeat", { page: PAGE_ID }).catch(() => {});
+}
+
+function initHeartbeat() {
+  beat();
+  setInterval(beat, HEARTBEAT_MS);
+  /* pagehide 比 beforeunload 可靠（手機瀏覽器、分頁被丟進背景快取都會觸發），
+     sendBeacon 則是關頁途中唯一送得出去的請求——一般 fetch 會被瀏覽器砍掉。
+     重新整理也會走這裡，後端那邊留了 CLOSE_GRACE 秒等新分頁接上。 */
+  window.addEventListener("pagehide", () => {
+    const body = new Blob([JSON.stringify({ page: PAGE_ID })],
+                          { type: "application/json" });
+    navigator.sendBeacon("/api/bye", body);
+  });
+}
+
+/* ---------- 啟動 ---------- */
+
+(async function init() {
+  try {
+    state = await api("/api/state");
+  } catch (e) {
+    document.body.innerHTML =
+      `<p style="padding:24px">連不上後端：${e.message}<br>請確認 web_ui.py 還在跑。</p>`;
+    return;
+  }
+  renderConnection();
+  renderRole();
+  renderMemories();
+  renderTools();
+  renderPrompt();
+  renderEmotions();
+  renderSettings();
+  renderCamera();
+  initCamFilter();
+  initVolume();
+  initHeartbeat();
+  renderChips();
+  setTurns(state.turns);
+  addMsg("sys", state.connection.key_ok
+    ? `<div class="bubble">準備好了。說句話試試，例如「台北現在天氣如何」會讓模型去用工具。</div>`
+    : `<div class="bubble">請先在左上角「連線與模型」填入你自己的 API 金鑰。</div>`);
+  $("input").focus();
+})();
+</script>
+</body>
+</html>

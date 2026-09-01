@@ -21,3 +21,6 @@ edge-tts>=7.2.8
 python-dotenv>=1.2.3
 
 # numpy（--input mic 錄音時用）已經是 reachy-mini 的相依，不重複列。
+
+# web_ui.py 的 FastAPI + uvicorn 不列在這裡：它們是 reachy-mini 本體的相依
+# （daemon 就跑在上面），裝好 SDK 就有。
